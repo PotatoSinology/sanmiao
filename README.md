@@ -1,7 +1,3 @@
-# TODO
-finish toml
-install with conda, if I can get that working
-
 # Sanmiao
 > **Chinese and Japanese historical date conversion in Python**.
 
