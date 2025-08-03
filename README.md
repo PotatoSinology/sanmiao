@@ -29,30 +29,19 @@ pip3 install -U sanmiao
 
 ## Using Sanmiao
 
-Sanmiao uses the astronomical year, where 1 B.C. = 0, 100 B.C. = -99, etc. To convert years, run:
+Sanmiao uses the astronomical year, where 1 B.C. = 0, 100 B.C. = -99, etc. It recognizes years (e.g., 534), Y-M-D date strings (e.g., -99-3-5, 1532-6-4), Julian Day Numbers (e.g., 1684971.5), and Chinese date strings of differing precision and completeness (e.g., "東漢孝獻皇帝劉協建安十八年二月," "太祖元年," or "三年三月甲申"). These should be separated by commas, semicolons, or line breaks:
 
-```sh
+```Python
 import sanmiao
 
-year = -99
-cjk_date_string = sanmiao.jy_to_ccs(year)
+user_input = """
+東漢孝獻皇帝劉協建安十八年二月, 
+宋太祖三年四月
+313-12-10, 
+415, 416, 417
+"""
+result = sanmiao.cjk_date_interpreter(user_input)
 ```
-
-To convert a Y-M-D date string or Julian Day Number, run:
-
-```sh
-import sanmiao
-
-iso_string = "-99-3-15"
-cjk_date_string = sanmiao.jdn_to_ccs(iso_string)
-
-jdn = 1684971.5
-cjk_date_string = sanmiao.jdn_to_ccs(jdn)
-```
-
-To look up a historical CJK date from a full or partial string, run:
-
-...
 ## Sources
 What distinguishes this date convertor from others is that it uses historical tables based, notably those of Zhang Peiyu[^1] and Uchida Masao,[^2] and it is updated to include new archeological evidence[^3] as well as minor dynasties and reign eras. The tables are based on calculation from contemporary procedure texts (_lifa_ 曆法), eclipses, and recorded dates, and I plan to expand them in future versions to include Korean tables and independantly calculated new moons for minor dynasties running different calendars.
 
