@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sanmiao"
+version = "0.1.0"
+authors = [
+    {name = "Daniel Patrick Morgan", email = "daniel.morgan@college-de-france.fr"}
+]
+description = "A Python package for date conversion to and from Chinese and Japanese historical calendars"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+    "pandas>=1.3.5",
+    "numpy>=1.21.0",  # Minimum compatible with Python 3.7
+    "lxml>=4.6.0",     # Minimum compatible with Python 3.7
+    "importlib_resources>=5.0; python_version < '3.9'"
+]
+keywords = ["date conversion", "Chinese calendar", "Japanese calendar", "history", "history of astronomy", "astronomy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering"
+]
+[project.urls]
+Homepage = "https://github.com/PotatoSinology/sanmiao"
+Repository = "https://github.com/PotatoSinology/sanmiao.git"
+Issues = "https://github.com/PotatoSinology/sanmiao/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
