@@ -39,3 +39,6 @@ Issues = "https://github.com/PotatoSinology/sanmiao/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+sanmiao = ["data/*.csv"]

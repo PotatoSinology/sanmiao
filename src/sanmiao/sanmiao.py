@@ -23,8 +23,7 @@ lp_dic = {'朔': 0, '晦': -1}
 def load_csv(csv_name):
     csv_path = data_dir / csv_name
     try:
-        with csv_path.open("r") as f:
-            df = pd.read_csv(f, index_col=False)
+        df = pd.read_csv(csv_path, index_col=False, encoding='utf-8')
     except FileNotFoundError:
         raise FileNotFoundError(f"CSV file {csv_name} not found in package data")
     return df
@@ -1012,7 +1011,6 @@ def interpret_date(node, correct=True, implied=None):
             a = a.merge(rul_dyn, how='left', on='ruler_id')
             b = table.dropna(subset=['dyn_id'])
             table = pd.concat([a, b])
-        table.to_csv('debug.csv')
         # Add names
         ruler_can_names = load_csv('rul_can_name.csv')[['person_id', 'string']]
         ruler_can_names = ruler_can_names.rename(columns={'person_id': 'ruler_id', 'string': 'ruler_name'})
