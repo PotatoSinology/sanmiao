@@ -19,3 +19,6 @@ venv/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Testing
+test.py
