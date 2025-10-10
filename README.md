@@ -6,7 +6,7 @@ Author: Daniel Patrick Morgan (CNRS-CRCAO)
 
 Sanmiao is a Python package for date conversion to and from Chinese and Japanese historical calendars (3rd cent. B.C.–20th cent.) written by a historian of astronomy. 
 
-GitHub: [https://github.com/architest/pymeeus](https://github.com/architest/pymeeus)
+GitHub: [https://github.com/PotatoSinology/sanmiao](https://github.com/architest/pymeeus)
 
 ## Installation
 
