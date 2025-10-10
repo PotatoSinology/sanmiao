@@ -58,6 +58,22 @@ lp_dic = {'朔': 0, '晦': -1}
 
 # TODO load tables only once
 
+
+simplified_only = set("宝応暦寿観斉亀")
+traditional_only = set("寶應曆壽觀齊龜")
+
+
+def guess_variant(text):
+    s_count = sum(ch in simplified_only for ch in text)
+    t_count = sum(ch in traditional_only for ch in text)
+    if t_count > s_count:
+        return "1"
+    elif s_count > t_count:
+        return "3"
+    else:
+        return "0"
+
+
 def load_csv(csv_name):
     csv_path = data_dir / csv_name
     try:
@@ -385,7 +401,7 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
     else:
         jdn = x
         iso = jdn_to_iso(jdn, proleptic_gregorian, gregorian_start)
-    output_string = f'{phrase_dic.get('ui')}: {iso} (JD {jdn})\n{phrase_dic.get('matches')}:\n'
+    output_string = f'{phrase_dic.get("ui")}: {iso} (JD {jdn})\n{phrase_dic.get("matches")}:\n'
     # Load CSV tables
     era_df, dyn_df, ruler_df, lunar_table = load_num_tables()
     ruler_tag_df = load_csv('rul_can_name.csv')[['person_id', 'string']]
@@ -514,7 +530,7 @@ def jy_to_ccs(y, lang='en'):
             fill = f"{int(abs(y)) + 1} B.C."
         else:
             fill = f"{int(abs(y)) + 1} av. J.-C."
-    output_string = f'{phrase_dic.get('ui')}: {y} ({fill})\n{phrase_dic.get('matches')}:\n'
+    output_string = f'{phrase_dic.get("ui")}: {y} ({fill})\n{phrase_dic.get("matches")}:\n'
     # Load CSV tables
     era_df, dyn_df, ruler_df, lunar_table = load_num_tables()
     ruler_tag_df = load_csv('rul_can_name.csv')[['person_id', 'string']]
@@ -538,6 +554,16 @@ def jy_to_ccs(y, lang='en'):
     df = df.merge(era_df, how='left', on='ruler_id')
     # Filter by year
     df = df[(df['era_start_year'] <= y) & (df['era_end_year'] >= y)].sort_values(by='dyn_id')
+    # Filter duplicates
+    try:
+        df['variant_rank'] = df['era_name'].apply(guess_variant)
+        df = (
+            df.sort_values(by='variant_rank')
+            .drop_duplicates(subset=['ruler_id', 'era_id'], keep="first")
+            .drop(columns="variant_rank")
+        )
+    except TypeError:
+        df = df.drop_duplicates(subset=['ruler_id', 'era_id'], keep="first")
     if not df.empty:
         # Create strings
         for index, row in df.iterrows():
@@ -1079,7 +1105,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
         return table
 
 
-    output = f'{phrase_dic.get('ui')}: {node.xpath("normalize-space(string())").replace(" ", "")}\n{phrase_dic.get('matches')}:\n'
+    output = f'{phrase_dic.get("ui")}: {node.xpath("normalize-space(string())").replace(" ", "")}\n{phrase_dic.get("matches")}:\n'
     year = None
     if implied is None:
         implied = {
@@ -1130,7 +1156,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
         dyn_df = dyn_df[dyn_df['dyn_id'].isin(dyn_ids)]
         # Errors:
         if ruler_df.empty:
-            output += f'{phrase_dic.get('rule-dyn')}\n'
+            output += f'{phrase_dic.get("rule-dyn")}\n'
     # Look for era
     era_tags = node.xpath('.//era')
     if len(era_tags) > 0:
@@ -1149,7 +1175,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
         dyn_ids = era_df.dyn_id.unique()
         dyn_df = dyn_df[dyn_df['dyn_id'].isin(dyn_ids)]
         if era_df.empty:
-            output += f'{phrase_dic.get('era-rule')}\n'
+            output += f'{phrase_dic.get("era-rule")}\n'
     # Look for year
     year_tags = node.xpath('.//year')
     if len(year_tags) > 0:
@@ -1166,11 +1192,11 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
                 era_df = era_df[era_df['max_year'] >= year]
                 ruler_df = ruler_df[ruler_df['max_year'] >= year]
                 if ruler_df.empty:
-                    output += f'{phrase_dic.get('rule-reign')}\n'
+                    output += f'{phrase_dic.get("rule-reign")}\n'
                 # Test if there is anything Han or earlier
                 test = dyn_df[dyn_df['dyn_id'] <= 43]
                 if era_df.empty and not test.empty:
-                    output += f'{phrase_dic.get('era-year')}\n'
+                    output += f'{phrase_dic.get("era-year")}\n'
             except ValueError:
                 pass
         if implied.get('year') != year:
@@ -1213,7 +1239,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
                 # Filter ruler dataframe
                 ruler_df = ruler_df[ruler_df['person_id'].isin(era_df['ruler_id'].unique())]
                 if ruler_df.empty:
-                    output += f'{phrase_dic.get('rule-sex')}\n'
+                    output += f'{phrase_dic.get("rule-sex")}\n'
                 # Test if there is anything Han or earlier
                 test = dyn_df[dyn_df['dyn_id'] <= 43]
                 if era_df.empty and not test.empty:
@@ -1596,7 +1622,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
                     df = temp
             # Limit on hits
             if df.shape[0] > 15:
-                output += f"{phrase_dic.get('er')}: {df.shape[0]} {phrase_dic.get('matches').lower()}"
+                output += f'{phrase_dic.get("er")}: {df.shape[0]} {phrase_dic.get("matches").lower()}'
                 if not correct:
                     df = pd.DataFrame([node.attrib])
                 else:
@@ -1702,15 +1728,18 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15
             is_y = False
             is_jdn = False
             try:
-                if int(item) != float(item):
-                    is_jdn = True
-                else:
-                    length = len(item)
-                    item = int(item)
-                    if length > 5:
-                        is_jdn = True
+                value = float(item)
+                if value.is_integer():  # e.g. 10.0 → True
+                    # it’s an integer, so maybe a year
+                    if len(item.split('.')[0]) > 5:
+                        is_jdn = True  # large integer, probably JDN
+                        item = float(item)
                     else:
-                        is_y = True
+                        is_y = True  # short integer, probably a year
+                        item = int(float(item))
+                else:
+                    is_jdn = True  # non-integer numeric, e.g. 168497.5
+                    item = float(item)
             except ValueError:
                 pass
             # Proceed accordingly
@@ -1734,8 +1763,9 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15
                     df, report, implied = interpret_date(node, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, jd_out=jd_out)
                     result += report + '\n\n'
             else:
-                result = f"{phrase_dic.get('ui')}: {item}\n{phrase_dic.get('nonsense')}"
-            result = result.rstrip("\n")
-            output_string += result + '\n\n'
+                result = f'{phrase_dic.get("ui")}: {item}\n{phrase_dic.get("nonsense")}'
+            if result is not None:
+                result = result.rstrip("\n")
+                output_string += result + '\n\n'
     output_string = output_string.rstrip("\n")
     return output_string
