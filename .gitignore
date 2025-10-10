@@ -21,4 +21,4 @@ venv/
 Thumbs.db
 
 # Testing
-test.py
+/test.py
