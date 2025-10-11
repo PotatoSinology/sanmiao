@@ -1662,7 +1662,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
                             start_gz = ganshu(row['nmd_gz'])
                             end_gz = ganshu((row['nmd_gz'] + row['max_day'] - 2) % 60 + 1)
                             if jd_out:
-                                temp_string += f'（{start_gz}{row["nmd_jdn"]} ~ {end_gz}{row["hui_jdn"]}''）'
+                                temp_string += f'（JD {start_gz}{row["nmd_jdn"]} ~ {end_gz}{row["hui_jdn"]}''）'
                             else:
                                 temp_string += f'（{start_gz}{row["ISO_Date_Start"]} ~ {end_gz}{row["ISO_Date_End"]}）'
                         if not pd.isna(row['day']) and row['lp'] != 0:
@@ -1674,7 +1674,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
                             temp_string += dic.get(row['lp'])
                         if 'jdn' in df.columns:
                             if jd_out:
-                                temp_string += f'（{row["jdn"]}）'
+                                temp_string += f'（JD {row["jdn"]}）'
                             else:
                                 temp_string += f'（{row["ISO_Date"]}）'
                         temp_string += '\n'
