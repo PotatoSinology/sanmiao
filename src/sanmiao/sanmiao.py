@@ -74,6 +74,23 @@ def guess_variant(text):
         return "0"
 
 
+def sanitize_gs(gs):
+    """
+    Return a list [year, month, day] of ints if valid,
+    otherwise the default [1582, 10, 15].
+    """
+    default = [1582, 10, 15]
+    if not isinstance(gs, (list, tuple)):
+        return default
+    if len(gs) != 3:
+        return default
+    try:
+        y, m, d = [int(x) for x in gs]
+        return [y, m, d]
+    except (ValueError, TypeError):
+        return default
+
+
 def load_csv(csv_name):
     csv_path = data_dir / csv_name
     try:
@@ -306,6 +323,7 @@ def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=[1582, 10
             return None
 
         # Determine calendar for historical mode
+        gregorian_start = sanitize_gs(gregorian_start)
         is_julian = False
         a, b, c = gregorian_start
         if not proleptic_gregorian:
@@ -347,6 +365,7 @@ def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=[1582, 10, 15]):
     :return: str (ISO date string) or None if invalid
     """
     # Get Gregorian reform JDN
+    gregorian_start = sanitize_gs(gregorian_start)
     gs_str = f"{gregorian_start[0]}-{gregorian_start[1]}-{gregorian_start[2]}"
     gs_jdn = iso_to_jdn(gs_str, proleptic_gregorian, gregorian_start)
     if not isinstance(jdn, (int, float)):
@@ -1023,6 +1042,8 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
         phrase_dic = phrase_dic_en
     else:
         phrase_dic = phrase_dic_fr
+    # Error check on Gregorian start date
+    gs = sanitize_gs(gs)
     # Retrieve tables
     era_df, dyn_df, ruler_df, lunar_table = load_num_tables()
     dyn_tag_df, ruler_tag_df = load_tag_tables()
