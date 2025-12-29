@@ -161,44 +161,17 @@ def load_num_tables(civ=['c', 'j', 'k']):
 
 
 def load_tag_tables(civ=['c', 'j', 'k']):
-    # #region agent log
-    import json
-    def json_serial(obj):
-        if isinstance(obj, (np.integer, np.int64, np.int32)):
-            return int(obj)
-        elif isinstance(obj, (np.floating, np.float64, np.float32)):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, pd.Series):
-            return obj.tolist()
-        return str(obj)
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:163', 'message': 'load_tag_tables entry', 'data': {'civ': str(civ)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     dyn_tag_df = load_csv('dynasty_tags.csv')
     ruler_tag_df = load_csv('ruler_tags.csv')
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:166', 'message': 'tag tables before filter', 'data': {'dyn_tag_rows': len(dyn_tag_df), 'ruler_tag_rows': len(ruler_tag_df), 'has_宋': bool('宋' in dyn_tag_df['string'].values if 'string' in dyn_tag_df.columns and len(dyn_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     
     # Filter by civilization
     # Load filtered dynasties and rulers to get valid IDs
     _, dyn_df, ruler_df, _ = load_num_tables(civ=civ)
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'E', 'location': 'sanmiao.py:171', 'message': 'filtered dyn/ruler from load_num_tables', 'data': {'dyn_df_rows': len(dyn_df), 'ruler_df_rows': len(ruler_df), 'dyn_ids_sample': [int(x) for x in dyn_df['dyn_id'].head(10).tolist()] if len(dyn_df) > 0 else []}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     
     # Filter dyn_tag_df by matching dyn_id to filtered dynasties
     if not dyn_df.empty:
         valid_dyn_ids = dyn_df['dyn_id'].unique()
         dyn_tag_df = dyn_tag_df[dyn_tag_df['dyn_id'].isin(valid_dyn_ids)]
-        # #region agent log
-        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:175', 'message': 'dyn_tag_df after filter', 'data': {'rows_after_filter': len(dyn_tag_df), 'has_宋': bool('宋' in dyn_tag_df['string'].values if 'string' in dyn_tag_df.columns and len(dyn_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-        # #endregion
     else:
         dyn_tag_df = dyn_tag_df.iloc[0:0]  # Empty dataframe with same structure
     
@@ -206,10 +179,6 @@ def load_tag_tables(civ=['c', 'j', 'k']):
     if not ruler_df.empty:
         valid_person_ids = ruler_df['person_id'].unique()
         ruler_tag_df = ruler_tag_df[ruler_tag_df['person_id'].isin(valid_person_ids)]
-        # #region agent log
-        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:182', 'message': 'ruler_tag_df after filter', 'data': {'rows_after_filter': len(ruler_tag_df), 'has_太祖': bool('太祖' in ruler_tag_df['string'].values if 'string' in ruler_tag_df.columns and len(ruler_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-        # #endregion
     else:
         ruler_tag_df = ruler_tag_df.iloc[0:0]  # Empty dataframe with same structure
     
@@ -816,52 +785,17 @@ def tag_date_elements(text, civ=['c', 'j', 'k']):
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return: str (XML)
     """
-    # #region agent log
-    import json
-    def json_serial(obj):
-        if isinstance(obj, (np.integer, np.int64, np.int32)):
-            return int(obj)
-        elif isinstance(obj, (np.floating, np.float64, np.float32)):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, pd.Series):
-            return obj.tolist()
-        return str(obj)
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A,B,D', 'location': 'sanmiao.py:788', 'message': 'tag_date_elements entry', 'data': {'civ': str(civ), 'text_preview': text[:50]}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     bu = text
     # Retrieve tag tables
     era_tag_df = load_csv('era_table.csv')
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A,D', 'location': 'sanmiao.py:791', 'message': 'era_tag_df before filter', 'data': {'total_rows': len(era_tag_df), 'null_cal_stream_count': int(era_tag_df['cal_stream'].isna().sum()), 'has_建安': bool('建安' in era_tag_df['era_name'].values if 'era_name' in era_tag_df.columns else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     # Filter era_tag_df by cal_stream
     cal_streams = get_cal_streams_from_civ(civ)
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A,D', 'location': 'sanmiao.py:793', 'message': 'cal_streams from civ', 'data': {'cal_streams': [float(x) for x in cal_streams] if cal_streams else None}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     if cal_streams is not None:
         era_tag_df_before = era_tag_df.copy()
         era_tag_df = era_tag_df[era_tag_df['cal_stream'].notna()]
-        # #region agent log
-        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A', 'location': 'sanmiao.py:795', 'message': 'after dropna', 'data': {'rows_after_dropna': len(era_tag_df), 'has_建安': bool('建安' in era_tag_df['era_name'].values if 'era_name' in era_tag_df.columns else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-        # #endregion
         # Convert cal_stream to float for comparison to avoid int/float mismatch
         era_tag_df = era_tag_df[era_tag_df['cal_stream'].astype(float).isin(cal_streams)]
-        # #region agent log
-        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'B,D', 'location': 'sanmiao.py:797', 'message': 'era_tag_df after filter', 'data': {'rows_after_filter': len(era_tag_df), 'has_建安': bool('建安' in era_tag_df['era_name'].values if 'era_name' in era_tag_df.columns else False), 'sample_era_names': era_tag_df['era_name'].head(10).tolist() if 'era_name' in era_tag_df.columns and len(era_tag_df) > 0 else []}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-        # #endregion
     dyn_tag_df, ruler_tag_df = load_tag_tables(civ=civ)
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:798', 'message': 'tag tables after load', 'data': {'dyn_tag_rows': len(dyn_tag_df), 'ruler_tag_rows': len(ruler_tag_df), 'has_宋': bool('宋' in dyn_tag_df['string'].values if 'string' in dyn_tag_df.columns and len(dyn_tag_df) > 0 else False), 'has_太祖': bool('太祖' in ruler_tag_df['string'].values if 'string' in ruler_tag_df.columns and len(ruler_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     # Sort tables by character length
     era_tag_df['nbcar'] = era_tag_df['era_name'].str.len()
     era_tag_df = era_tag_df[['era_name', 'nbcar']]
@@ -876,10 +810,6 @@ def tag_date_elements(text, civ=['c', 'j', 'k']):
     era_tag_list = era_tag_df['era_name'].unique()
     dyn_tag_list = dyn_tag_df['string'].unique()
     ruler_tag_list = ruler_tag_df['string'].unique()
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'B,C', 'location': 'sanmiao.py:812', 'message': 'final tag lists', 'data': {'era_list_len': len(era_tag_list), 'dyn_list_len': len(dyn_tag_list), 'ruler_list_len': len(ruler_tag_list), 'has_建安_in_list': bool('建安' in era_tag_list if len(era_tag_list) > 0 else False), 'has_宋_in_list': bool('宋' in dyn_tag_list if len(dyn_tag_list) > 0 else False), 'has_太祖_in_list': bool('太祖' in ruler_tag_list if len(ruler_tag_list) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     # Normal dates #####################################################################################################
     # Year (must come before era names to avoid conflicts on 元)
     re_year = r'(([一二三四五六七八九十]+|元)[年|載])'
@@ -922,15 +852,7 @@ def tag_date_elements(text, civ=['c', 'j', 'k']):
     # Era names ########################################################################################################
     # Reduce list
     era_tag_list = [i for i in era_tag_list if isinstance(i, str)]
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:925', 'message': 'before era text filter', 'data': {'era_list_len': len(era_tag_list), 'text_preview': text[:100], 'has_建安_in_text': '建安' in text, 'has_建安_in_list': '建安' in era_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     era_tag_list = [i for i in era_tag_list if i in text]
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:927', 'message': 'after era text filter', 'data': {'era_list_len': len(era_tag_list), 'has_建安_in_list': '建安' in era_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     # Tag
     for string in era_tag_list:
         # In longer format
@@ -943,15 +865,7 @@ def tag_date_elements(text, civ=['c', 'j', 'k']):
         text = clean_attributes(text)
     # Ruler Names ######################################################################################################
     # Reduce list
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:940', 'message': 'before ruler text filter', 'data': {'ruler_list_len': len(ruler_tag_list), 'text_preview': text[:100], 'has_太祖_in_text': '太祖' in text, 'has_太祖_in_list': '太祖' in ruler_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     ruler_tag_list = [i for i in ruler_tag_list if i in text]
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:942', 'message': 'after ruler text filter', 'data': {'ruler_list_len': len(ruler_tag_list), 'has_太祖_in_list': '太祖' in ruler_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     # Tag
     for string in ruler_tag_list:
         text = re.sub(string, f'<date><ruler>{string}</ruler></date>', text)
@@ -963,15 +877,7 @@ def tag_date_elements(text, civ=['c', 'j', 'k']):
         text = clean_attributes(text)
     # Dynasty Names ####################################################################################################
     # Reduce list
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:953', 'message': 'before dyn text filter', 'data': {'dyn_list_len': len(dyn_tag_list), 'text_preview': text[:100], 'has_宋_in_text': '宋' in text, 'has_宋_in_list': '宋' in dyn_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     dyn_tag_list = [i for i in dyn_tag_list if i in text]
-    # #region agent log
-    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
-        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:955', 'message': 'after dyn text filter', 'data': {'dyn_list_len': len(dyn_tag_list), 'has_宋_in_list': '宋' in dyn_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
-    # #endregion
     # Tag
     for string in dyn_tag_list:
         text = re.sub(string, f'<date><dyn>{string}</dyn></date>', text)
