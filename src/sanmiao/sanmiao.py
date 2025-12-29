@@ -100,17 +100,119 @@ def load_csv(csv_name):
     return df
 
 
-def load_num_tables():
+def get_cal_streams_from_civ(civ):
+    """
+    Convert civilization code(s) to list of cal_stream floats.
+    
+    :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) or None
+    :return: list of floats (to match CSV data type) or None if civ is None
+    """
+    if civ is None:
+        return None
+    
+    # Map civilization codes to cal_stream ranges
+    civ_map = {
+        'c': [1, 2, 3],  # China
+        'j': [4],         # Japan
+        'k': [5, 6, 7, 8]  # Korea
+    }
+    
+    # Handle single string
+    if isinstance(civ, str):
+        civ = [civ]
+    
+    # Collect all cal_streams
+    cal_streams = []
+    for code in civ:
+        if code.lower() in civ_map:
+            cal_streams.extend(civ_map[code.lower()])
+    
+    # Remove duplicates, sort, and convert to float to match CSV data type
+    return sorted([float(x) for x in set(cal_streams)]) if cal_streams else None
+
+
+def load_num_tables(civ=['c', 'j', 'k']):
     era_df = load_csv('era_table.csv')
     dyn_df = load_csv('dynasty_table_dump.csv')
     ruler_df = load_csv('ruler_table.csv')
     lunar_table = load_csv('lunar_table_dump.csv')
+    
+    # Filter by civilization
+    cal_streams = get_cal_streams_from_civ(civ)
+    if cal_streams is not None:
+        # Filter dyn_df: drop null cal_stream and filter by cal_stream list
+        dyn_df = dyn_df[dyn_df['cal_stream'].notna()]
+        # Convert cal_stream to float for comparison to avoid int/float mismatch
+        dyn_df = dyn_df[dyn_df['cal_stream'].astype(float).isin(cal_streams)]
+        
+        # Filter era_df: drop null cal_stream and filter by cal_stream list
+        era_df = era_df[era_df['cal_stream'].notna()]
+        era_df = era_df[era_df['cal_stream'].astype(float).isin(cal_streams)]
+        
+        # Filter ruler_df: drop null cal_stream and filter by cal_stream list
+        ruler_df = ruler_df[ruler_df['cal_stream'].notna()]
+        ruler_df = ruler_df[ruler_df['cal_stream'].astype(float).isin(cal_streams)]
+        
+        # Filter lunar_table: drop null cal_stream and filter by cal_stream list
+        lunar_table = lunar_table[lunar_table['cal_stream'].notna()]
+        lunar_table = lunar_table[lunar_table['cal_stream'].astype(float).isin(cal_streams)]
+    
     return era_df, dyn_df, ruler_df, lunar_table
 
 
-def load_tag_tables():
+def load_tag_tables(civ=['c', 'j', 'k']):
+    # #region agent log
+    import json
+    def json_serial(obj):
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, pd.Series):
+            return obj.tolist()
+        return str(obj)
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:163', 'message': 'load_tag_tables entry', 'data': {'civ': str(civ)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     dyn_tag_df = load_csv('dynasty_tags.csv')
     ruler_tag_df = load_csv('ruler_tags.csv')
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:166', 'message': 'tag tables before filter', 'data': {'dyn_tag_rows': len(dyn_tag_df), 'ruler_tag_rows': len(ruler_tag_df), 'has_宋': bool('宋' in dyn_tag_df['string'].values if 'string' in dyn_tag_df.columns and len(dyn_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
+    
+    # Filter by civilization
+    # Load filtered dynasties and rulers to get valid IDs
+    _, dyn_df, ruler_df, _ = load_num_tables(civ=civ)
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'E', 'location': 'sanmiao.py:171', 'message': 'filtered dyn/ruler from load_num_tables', 'data': {'dyn_df_rows': len(dyn_df), 'ruler_df_rows': len(ruler_df), 'dyn_ids_sample': [int(x) for x in dyn_df['dyn_id'].head(10).tolist()] if len(dyn_df) > 0 else []}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
+    
+    # Filter dyn_tag_df by matching dyn_id to filtered dynasties
+    if not dyn_df.empty:
+        valid_dyn_ids = dyn_df['dyn_id'].unique()
+        dyn_tag_df = dyn_tag_df[dyn_tag_df['dyn_id'].isin(valid_dyn_ids)]
+        # #region agent log
+        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:175', 'message': 'dyn_tag_df after filter', 'data': {'rows_after_filter': len(dyn_tag_df), 'has_宋': bool('宋' in dyn_tag_df['string'].values if 'string' in dyn_tag_df.columns and len(dyn_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+        # #endregion
+    else:
+        dyn_tag_df = dyn_tag_df.iloc[0:0]  # Empty dataframe with same structure
+    
+    # Filter ruler_tag_df by matching person_id to filtered rulers
+    if not ruler_df.empty:
+        valid_person_ids = ruler_df['person_id'].unique()
+        ruler_tag_df = ruler_tag_df[ruler_tag_df['person_id'].isin(valid_person_ids)]
+        # #region agent log
+        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:182', 'message': 'ruler_tag_df after filter', 'data': {'rows_after_filter': len(ruler_tag_df), 'has_太祖': bool('太祖' in ruler_tag_df['string'].values if 'string' in ruler_tag_df.columns and len(ruler_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+        # #endregion
+    else:
+        ruler_tag_df = ruler_tag_df.iloc[0:0]  # Empty dataframe with same structure
+    
     return dyn_tag_df, ruler_tag_df
 
 
@@ -403,11 +505,12 @@ def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=[1582, 10, 15]):
         return None
 
 
-def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582, 10, 15], lang='en'):
+def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582, 10, 15], lang='en', civ=['c', 'j', 'k']):
     """
     Convert Julian Day Number to Chinese calendar string.
     :param x: float (Julian Day Number) or str (ISO date string Y-M-D)
     :param by_era: bool (filter from era JDN vs index year)
+    :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
     if lang == 'en':
@@ -420,10 +523,14 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
     else:
         jdn = x
         iso = jdn_to_iso(jdn, proleptic_gregorian, gregorian_start)
-    output_string = f'{phrase_dic.get("ui")}: {iso} (JD {jdn})\n{phrase_dic.get("matches")}:\n'
+    output_string = f'{phrase_dic.get("ui")}: {iso} (JD {jdn})\n{phrase_dic.get("matches")}:\n'
     # Load CSV tables
-    era_df, dyn_df, ruler_df, lunar_table = load_num_tables()
+    era_df, dyn_df, ruler_df, lunar_table = load_num_tables(civ=civ)
     ruler_tag_df = load_csv('rul_can_name.csv')[['person_id', 'string']]
+    # Filter ruler_tag_df by filtered rulers
+    if not ruler_df.empty:
+        valid_person_ids = ruler_df['person_id'].unique()
+        ruler_tag_df = ruler_tag_df[ruler_tag_df['person_id'].isin(valid_person_ids)]
     # Filter lunar table by JDN
     lunar_table = lunar_table[(lunar_table['nmd_jdn'] <= jdn) & (lunar_table['hui_jdn'] + 1 > jdn)]
     #
@@ -438,6 +545,10 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
         df = df.merge(dyn_df[['dyn_id', 'dyn_name']], how='left', on='dyn_id')
         # Merge with lunar table
         lunar_table = df.merge(lunar_table, how='left', on='cal_stream')
+        # Add ruler start year, just to be safe
+        temp = ruler_df[['person_id', 'emp_start_year']]
+        temp = temp.rename(columns={'person_id': 'ruler_id'})
+        lunar_table = lunar_table.merge(temp, how='left', on='ruler_id')
     else:
         # Merge dynasties
         lunar_table = lunar_table.merge(dyn_df, how='left', on='cal_stream')
@@ -529,10 +640,11 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
         return None
 
 
-def jy_to_ccs(y, lang='en'):
+def jy_to_ccs(y, lang='en', civ=['c', 'j', 'k']):
     """
     Convert Western year to Chinese calendar string.
     :param y: int
+    :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
     if lang == 'en':
@@ -543,16 +655,20 @@ def jy_to_ccs(y, lang='en'):
         if lang == 'en':
             fill = f"A.D. {int(y)}"
         else:
-            fill = f"{int(y)} apr. J.-C."
+            fill = f"{int(y)} apr. J.-C."
     else:
         if lang == 'en':
             fill = f"{int(abs(y)) + 1} B.C."
         else:
-            fill = f"{int(abs(y)) + 1} av. J.-C."
+            fill = f"{int(abs(y)) + 1} av. J.-C."
     output_string = f'{phrase_dic.get("ui")}: {y} ({fill})\n{phrase_dic.get("matches")}:\n'
     # Load CSV tables
-    era_df, dyn_df, ruler_df, lunar_table = load_num_tables()
+    era_df, dyn_df, ruler_df, lunar_table = load_num_tables(civ=civ)
     ruler_tag_df = load_csv('rul_can_name.csv')[['person_id', 'string']]
+    # Filter ruler_tag_df by filtered rulers
+    if not ruler_df.empty:
+        valid_person_ids = ruler_df['person_id'].unique()
+        ruler_tag_df = ruler_tag_df[ruler_tag_df['person_id'].isin(valid_person_ids)]
     ruler_tag_df = ruler_tag_df[['person_id', 'string']]
     # Filter dynasties by year
     df = dyn_df[(dyn_df['dyn_start_year'] <= y) & (dyn_df['dyn_end_year'] >= y)]
@@ -692,17 +808,60 @@ def strip_text(xml_string):
     return xml_string
 
 
-def tag_date_elements(text):
+def tag_date_elements(text, civ=['c', 'j', 'k']):
     """
     Tag and clean Chinese string containing date with relevant elements for extraction. Each date element remains
     separated, awaiting "consolidation."
     :param text: str
+    :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return: str (XML)
     """
+    # #region agent log
+    import json
+    def json_serial(obj):
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, pd.Series):
+            return obj.tolist()
+        return str(obj)
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A,B,D', 'location': 'sanmiao.py:788', 'message': 'tag_date_elements entry', 'data': {'civ': str(civ), 'text_preview': text[:50]}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     bu = text
     # Retrieve tag tables
     era_tag_df = load_csv('era_table.csv')
-    dyn_tag_df, ruler_tag_df = load_tag_tables()
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A,D', 'location': 'sanmiao.py:791', 'message': 'era_tag_df before filter', 'data': {'total_rows': len(era_tag_df), 'null_cal_stream_count': int(era_tag_df['cal_stream'].isna().sum()), 'has_建安': bool('建安' in era_tag_df['era_name'].values if 'era_name' in era_tag_df.columns else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
+    # Filter era_tag_df by cal_stream
+    cal_streams = get_cal_streams_from_civ(civ)
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A,D', 'location': 'sanmiao.py:793', 'message': 'cal_streams from civ', 'data': {'cal_streams': [float(x) for x in cal_streams] if cal_streams else None}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
+    if cal_streams is not None:
+        era_tag_df_before = era_tag_df.copy()
+        era_tag_df = era_tag_df[era_tag_df['cal_stream'].notna()]
+        # #region agent log
+        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'A', 'location': 'sanmiao.py:795', 'message': 'after dropna', 'data': {'rows_after_dropna': len(era_tag_df), 'has_建安': bool('建安' in era_tag_df['era_name'].values if 'era_name' in era_tag_df.columns else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+        # #endregion
+        # Convert cal_stream to float for comparison to avoid int/float mismatch
+        era_tag_df = era_tag_df[era_tag_df['cal_stream'].astype(float).isin(cal_streams)]
+        # #region agent log
+        with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'B,D', 'location': 'sanmiao.py:797', 'message': 'era_tag_df after filter', 'data': {'rows_after_filter': len(era_tag_df), 'has_建安': bool('建安' in era_tag_df['era_name'].values if 'era_name' in era_tag_df.columns else False), 'sample_era_names': era_tag_df['era_name'].head(10).tolist() if 'era_name' in era_tag_df.columns and len(era_tag_df) > 0 else []}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+        # #endregion
+    dyn_tag_df, ruler_tag_df = load_tag_tables(civ=civ)
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'C,E', 'location': 'sanmiao.py:798', 'message': 'tag tables after load', 'data': {'dyn_tag_rows': len(dyn_tag_df), 'ruler_tag_rows': len(ruler_tag_df), 'has_宋': bool('宋' in dyn_tag_df['string'].values if 'string' in dyn_tag_df.columns and len(dyn_tag_df) > 0 else False), 'has_太祖': bool('太祖' in ruler_tag_df['string'].values if 'string' in ruler_tag_df.columns and len(ruler_tag_df) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     # Sort tables by character length
     era_tag_df['nbcar'] = era_tag_df['era_name'].str.len()
     era_tag_df = era_tag_df[['era_name', 'nbcar']]
@@ -717,6 +876,10 @@ def tag_date_elements(text):
     era_tag_list = era_tag_df['era_name'].unique()
     dyn_tag_list = dyn_tag_df['string'].unique()
     ruler_tag_list = ruler_tag_df['string'].unique()
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'B,C', 'location': 'sanmiao.py:812', 'message': 'final tag lists', 'data': {'era_list_len': len(era_tag_list), 'dyn_list_len': len(dyn_tag_list), 'ruler_list_len': len(ruler_tag_list), 'has_建安_in_list': bool('建安' in era_tag_list if len(era_tag_list) > 0 else False), 'has_宋_in_list': bool('宋' in dyn_tag_list if len(dyn_tag_list) > 0 else False), 'has_太祖_in_list': bool('太祖' in ruler_tag_list if len(ruler_tag_list) > 0 else False)}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     # Normal dates #####################################################################################################
     # Year (must come before era names to avoid conflicts on 元)
     re_year = r'(([一二三四五六七八九十]+|元)[年|載])'
@@ -759,7 +922,15 @@ def tag_date_elements(text):
     # Era names ########################################################################################################
     # Reduce list
     era_tag_list = [i for i in era_tag_list if isinstance(i, str)]
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:925', 'message': 'before era text filter', 'data': {'era_list_len': len(era_tag_list), 'text_preview': text[:100], 'has_建安_in_text': '建安' in text, 'has_建安_in_list': '建安' in era_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     era_tag_list = [i for i in era_tag_list if i in text]
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:927', 'message': 'after era text filter', 'data': {'era_list_len': len(era_tag_list), 'has_建安_in_list': '建安' in era_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     # Tag
     for string in era_tag_list:
         # In longer format
@@ -772,7 +943,15 @@ def tag_date_elements(text):
         text = clean_attributes(text)
     # Ruler Names ######################################################################################################
     # Reduce list
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:940', 'message': 'before ruler text filter', 'data': {'ruler_list_len': len(ruler_tag_list), 'text_preview': text[:100], 'has_太祖_in_text': '太祖' in text, 'has_太祖_in_list': '太祖' in ruler_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     ruler_tag_list = [i for i in ruler_tag_list if i in text]
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:942', 'message': 'after ruler text filter', 'data': {'ruler_list_len': len(ruler_tag_list), 'has_太祖_in_list': '太祖' in ruler_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     # Tag
     for string in ruler_tag_list:
         text = re.sub(string, f'<date><ruler>{string}</ruler></date>', text)
@@ -784,7 +963,15 @@ def tag_date_elements(text):
         text = clean_attributes(text)
     # Dynasty Names ####################################################################################################
     # Reduce list
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:953', 'message': 'before dyn text filter', 'data': {'dyn_list_len': len(dyn_tag_list), 'text_preview': text[:100], 'has_宋_in_text': '宋' in text, 'has_宋_in_list': '宋' in dyn_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     dyn_tag_list = [i for i in dyn_tag_list if i in text]
+    # #region agent log
+    with open('/home/d/Python/sanmiao/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'F', 'location': 'sanmiao.py:955', 'message': 'after dyn text filter', 'data': {'dyn_list_len': len(dyn_tag_list), 'has_宋_in_list': '宋' in dyn_tag_list}, 'timestamp': int(__import__('time').time() * 1000)}, default=json_serial) + '\n')
+    # #endregion
     # Tag
     for string in dyn_tag_list:
         text = re.sub(string, f'<date><dyn>{string}</dyn></date>', text)
@@ -1023,7 +1210,7 @@ def xml_to_table(text, filter=True):
     return text, list_for_df
 
 
-def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15], lang="en", tpq=-3000, taq=3000, jd_out=False):
+def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15], lang="en", tpq=-3000, taq=3000, jd_out=False, civ=['c', 'j', 'k']):
     """
     Filter strings and numbers in date to find matches.
 
@@ -1035,6 +1222,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
     :param lang: str
     :param tpq: int
     :param taq: int
+    :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return: df (DataFrame, output (str), implied (dict)
     """
 
@@ -1045,8 +1233,8 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
     # Error check on Gregorian start date
     gs = sanitize_gs(gs)
     # Retrieve tables
-    era_df, dyn_df, ruler_df, lunar_table = load_num_tables()
-    dyn_tag_df, ruler_tag_df = load_tag_tables()
+    era_df, dyn_df, ruler_df, lunar_table = load_num_tables(civ=civ)
+    dyn_tag_df, ruler_tag_df = load_tag_tables(civ=civ)
     dyn_can_names = dyn_df[['dyn_id', 'dyn_name']].copy().drop_duplicates()
     rul_dyn = ruler_df[['person_id', 'dyn_id']].copy().rename(columns={'person_id': 'ruler_id'})
 
@@ -1120,6 +1308,17 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
             table = pd.concat([a, b])
         # Add names
         ruler_can_names = load_csv('rul_can_name.csv')[['person_id', 'string']]
+        # Filter ruler_can_names by filtered rulers
+        # Note: ruler_df may have 'person_id' or 'ruler_id' depending on where we are in the function
+        if not ruler_df.empty:
+            if 'person_id' in ruler_df.columns:
+                valid_person_ids = ruler_df['person_id'].unique()
+            elif 'ruler_id' in ruler_df.columns:
+                valid_person_ids = ruler_df['ruler_id'].unique()
+            else:
+                valid_person_ids = []
+            if len(valid_person_ids) > 0:
+                ruler_can_names = ruler_can_names[ruler_can_names['person_id'].isin(valid_person_ids)]
         ruler_can_names = ruler_can_names.rename(columns={'person_id': 'ruler_id', 'string': 'ruler_name'})
         table = table.merge(ruler_can_names, how='left', on='ruler_id')
         table = table.merge(dyn_can_names, how='left', on='dyn_id')
@@ -1729,7 +1928,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
     return df, output, implied
 
 
-def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15], tpq=-3000, taq=3000):
+def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15], tpq=-3000, taq=3000, civ=['c', 'j', 'k']):
     if lang == 'en':
         phrase_dic = phrase_dic_en
     else:
@@ -1751,7 +1950,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15
             try:
                 value = float(item)
                 if value.is_integer():  # e.g. 10.0 → True
-                    # it’s an integer, so maybe a year
+                    # it's an integer, so maybe a year
                     if len(item.split('.')[0]) > 5:
                         is_jdn = True  # large integer, probably JDN
                         item = float(item)
@@ -1765,12 +1964,12 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15
                 pass
             # Proceed accordingly
             if is_jdn or is_iso:
-                result = jdn_to_ccs(item, proleptic_gregorian=pg, gregorian_start=gs, lang=lang)
+                result = jdn_to_ccs(item, proleptic_gregorian=pg, gregorian_start=gs, lang=lang, civ=civ)
             elif is_y:
-                result = jy_to_ccs(item, lang=lang)
+                result = jy_to_ccs(item, lang=lang, civ=civ)
             elif is_ccs:
                 # Convert string to XML, tag all date elements
-                xml_string = tag_date_elements(item)
+                xml_string = tag_date_elements(item, civ=civ)
                 # Consolidate
                 xml_string = consolidate_date(xml_string)
                 # Remove non-date text
@@ -1781,7 +1980,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15
                 implied = None
                 for node in et.ElementTree(et.fromstring(xml_string)).getroot().xpath('.//date'):
                     # Interpret the date
-                    df, report, implied = interpret_date(node, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, jd_out=jd_out)
+                    df, report, implied = interpret_date(node, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, jd_out=jd_out, civ=civ)
                     result += report + '\n\n'
             else:
                 result = f'{phrase_dic.get("ui")}: {item}\n{phrase_dic.get("nonsense")}'

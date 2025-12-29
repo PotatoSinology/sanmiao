@@ -22,3 +22,14 @@ Thumbs.db
 
 # Testing
 /test.py
+
+# SQL scripts (private)
+sql_date_table_download.py
+sql_norbert.py
+
+# Debug logs
+.cursor/debug.log
+
+# Lock files
+*.lock*
+*~lock*
