@@ -545,7 +545,7 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
         lunar_table = lunar_table[lunar_table['era_end_year'] > lunar_table['ind_year']]
         del lunar_table['era_end_year']
     if not lunar_table.empty:
-        lunar_table = lunar_table.sort_values(by='dyn_id')
+        lunar_table = lunar_table.sort_values(by=['cal_stream', 'dyn_id'])
         # Create strings
         for index, row in lunar_table.iterrows():
             # Output dynasty and ruler name
@@ -559,16 +559,19 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
                 mult = 1
             year = int(re.split('-', iso_string)[0]) * mult
             # Convert to era or ruler year
-            if isinstance(row['era_start_year'], float):
-                if isinstance(row['era_name'], str):
+            # Check if era_start_year is valid (not NaN) - works for both int and float
+            if pd.notna(row['era_start_year']):
+                # We have a valid era, use it (even if era_name is blank)
+                if isinstance(row['era_name'], str) and row['era_name'] != '':
                     output_string += f"{row['era_name']}"
                 # Find era year
-                era_year = year - row['era_start_year'] + 1
+                era_year = year - int(row['era_start_year']) + 1
                 era_year = numcon(era_year) + '年'
                 if era_year == "一年":
                     era_year = "元年"
                 output_string += era_year
             else:
+                # No valid era, fall back to ruler start year
                 ruler_year = year - row['emp_start_year'] + 1
                 ruler_year = numcon(ruler_year) + '年'
                 if ruler_year == "一年":
@@ -657,7 +660,7 @@ def jy_to_ccs(y, lang='en', civ=['c', 'j', 'k']):
     era_df = era_df[['era_id', 'ruler_id', 'era_name', 'era_start_year', 'era_end_year']]
     df = df.merge(era_df, how='left', on='ruler_id')
     # Filter by year
-    df = df[(df['era_start_year'] <= y) & (df['era_end_year'] >= y)].sort_values(by='dyn_id')
+    df = df[(df['era_start_year'] <= y) & (df['era_end_year'] >= y)].sort_values(by=['cal_stream', 'dyn_id'])
     # Filter duplicates
     try:
         df['variant_rank'] = df['era_name'].apply(guess_variant)
@@ -1762,7 +1765,7 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
                     df = add_can_names(df)
                     # Text output
                     temp_string = ""  # f"MATCHES: "
-                    df = df.sort_values(by='ind_year')
+                    df = df.sort_values(by=['cal_stream', 'ind_year'])
                     for index, row in df.iterrows():
                         temp_string += f"{row['dyn_name']}{row['ruler_name']}"
                         if isinstance(row['era_name'], str):
