@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../sanmiao_site_backend"
+		},
+		{
+			"path": "../sanmiao_frontend"
+		}
+	],
+	"settings": {}
+}
