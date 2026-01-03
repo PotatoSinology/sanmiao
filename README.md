@@ -6,7 +6,7 @@ Author: Daniel Patrick Morgan (CNRS-CRCAO)
 
 Sanmiao is a Python package for date conversion to and from Chinese and Japanese historical calendars (3rd cent. B.C.–20th cent.) written by a historian of astronomy. 
 
-GitHub: [https://github.com/PotatoSinology/sanmiao](https://github.com/architest/pymeeus)
+GitHub: [https://github.com/PotatoSinology/sanmiao](https://github.com/PotatoSinology/sanmiao)
 
 ## Installation
 
@@ -38,8 +38,8 @@ import sanmiao
 user_input = """
 東漢孝獻皇帝劉協建安十八年二月, 
 宋太祖三年四月
-313-12-10, -215-10-14
-415, 416, -181
+1313-12-10, -215-10-14
+415, -181
 """
 result = sanmiao.cjk_date_interpreter(user_input)
 print(result)

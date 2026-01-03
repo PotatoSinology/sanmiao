@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import lxml.etree as et
 from math import floor
-import warnings
+from functools import lru_cache
 
 phrase_dic_en = {
     'ui': 'USER INPUT', 'matches': 'MATCHES', 'nonsense': 'ERROR: You did a nonsense',
@@ -49,9 +49,6 @@ phrase_dic_fr = {
 
 data_dir = files("sanmiao") / "data"
 
-# Suppress FutureWarning
-warnings.filterwarnings("ignore", category=FutureWarning)
-
 # Define terms for conversion below
 season_dic = {'春': 1, '夏': 2, '秋': 3, '冬': 4}
 lp_dic = {'朔': 0, '晦': -1}
@@ -91,13 +88,21 @@ def sanitize_gs(gs):
         return default
 
 
-def load_csv(csv_name):
+@lru_cache(maxsize=None)
+def _load_csv_cached(csv_name: str) -> pd.DataFrame:
     csv_path = data_dir / csv_name
     try:
-        df = pd.read_csv(csv_path, index_col=False, encoding='utf-8')
+        return pd.read_csv(csv_path, index_col=False, encoding="utf-8")
     except FileNotFoundError:
         raise FileNotFoundError(f"CSV file {csv_name} not found in package data")
-    return df
+
+
+def load_csv(csv_name: str) -> pd.DataFrame:
+    """
+    Public loader: returns a *copy* so callers can filter/mutate safely
+    without poisoning the cached DataFrame.
+    """
+    return _load_csv_cached(csv_name).copy()
 
 
 def get_cal_streams_from_civ(civ):
@@ -131,7 +136,12 @@ def get_cal_streams_from_civ(civ):
     return sorted([float(x) for x in set(cal_streams)]) if cal_streams else None
 
 
-def load_num_tables(civ=['c', 'j', 'k']):
+def load_num_tables(civ=None):
+    # Default civilisations
+    if civ is None:
+        civ = ['c', 'j', 'k']
+
+    # Load tables
     era_df = load_csv('era_table.csv')
     dyn_df = load_csv('dynasty_table_dump.csv')
     ruler_df = load_csv('ruler_table.csv')
@@ -160,7 +170,12 @@ def load_num_tables(civ=['c', 'j', 'k']):
     return era_df, dyn_df, ruler_df, lunar_table
 
 
-def load_tag_tables(civ=['c', 'j', 'k']):
+def load_tag_tables(civ=None):
+    # Default civilisations
+    if civ is None:
+        civ = ['c', 'j', 'k']
+
+    # Load tables
     dyn_tag_df = load_csv('dynasty_tags.csv')
     ruler_tag_df = load_csv('ruler_tags.csv')
     
@@ -206,6 +221,27 @@ def jdn_to_gz(jdn, en=False):
     return gz
 
 
+_GANZHI_ZH_TO_NUM = {
+    '甲子': 1, '乙丑': 2, '丙寅': 3, '丁卯': 4, '戊辰': 5, '己巳': 6, '庚午': 7, '辛未': 8, '壬申': 9, '癸酉': 10,
+    '甲戌': 11, '乙亥': 12, '丙子': 13, '丁丑': 14, '戊寅': 15, '己卯': 16, '庚辰': 17, '辛巳': 18, '壬午': 19, '癸未': 20,
+    '甲申': 21, '乙酉': 22, '丙戌': 23, '丁亥': 24, '戊子': 25, '己丑': 26, '庚寅': 27, '辛卯': 28, '壬辰': 29, '癸巳': 30,
+    '甲午': 31, '乙未': 32, '丙申': 33, '丁酉': 34, '戊戌': 35, '己亥': 36, '庚子': 37, '辛丑': 38, '壬寅': 39, '癸卯': 40,
+    '甲辰': 41, '乙巳': 42, '丙午': 43, '丁未': 44, '戊申': 45, '己酉': 46, '庚戌': 47, '辛亥': 48, '壬子': 49, '癸丑': 50,
+    '甲寅': 51, '乙卯': 52, '丙辰': 53, '丁巳': 54, '戊午': 55, '己未': 56, '庚申': 57, '辛酉': 58, '壬戌': 59, '癸亥': 60,
+}
+_NUM_TO_GANZHI_ZH = {v: k for k, v in _GANZHI_ZH_TO_NUM.items()}
+
+_GANZHI_PINYIN_TO_NUM = {
+    'jiazi': 1, 'yichou': 2, 'bingyin': 3, 'dingmao': 4, 'wuchen': 5, 'jisi': 6, 'gengwu': 7, 'xinwei': 8, 'renshen': 9, 'guiyou': 10,
+    'jiaxu': 11, 'yihai': 12, 'bingzi': 13, 'dingchou': 14, 'wuyin': 15, 'jimao': 16, 'gengchen': 17, 'xinsi': 18, 'renwu': 19, 'guiwei': 20,
+    'jiashen': 21, 'yiyou': 22, 'bingxu': 23, 'dinghai': 24, 'wuzi': 25, 'jichou': 26, 'gengyin': 27, 'xinmao': 28, 'renchen': 29, 'guisi': 30,
+    'jiawu': 31, 'yiwei': 32, 'bingshen': 33, 'dingyou': 34, 'wuxu': 35, 'jihai': 36, 'gengzi': 37, 'xinchou': 38, 'renyin': 39, 'guimao': 40,
+    'jiachen': 41, 'yisi': 42, 'bingwu': 43, 'dingwei': 44, 'wushen': 45, 'jiyou': 46, 'gengxu': 47, 'xinhai': 48, 'renzi': 49, 'guichou': 50,
+    'jiayin': 51, 'yimao': 52, 'bingchen': 53, 'dingsi': 54, 'wuwu': 55, 'jiwei': 56, 'gengshen': 57, 'xinyou': 58, 'renxu': 59, 'guihai': 60,
+}
+_NUM_TO_GANZHI_PINYIN = {v: k for k, v in _GANZHI_PINYIN_TO_NUM.items()}
+
+
 def ganshu(input, en=False):
     """
     Convert from sexagenary counter (string) to number (int) and vice versa.
@@ -213,50 +249,32 @@ def ganshu(input, en=False):
     :param en: Boolean, whether into Pinyin (vs Chinese)
     :return: int or str
     """
-    result = 'ERROR'
-    if not en:
-        ganzhi_dict = {
-            '甲子': 1, '乙丑': 2, '丙寅': 3, '丁卯': 4, '戊辰': 5, '己巳': 6, '庚午': 7, '辛未': 8, '壬申': 9,
-            '癸酉': 10,
-            '甲戌': 11, '乙亥': 12, '丙子': 13, '丁丑': 14, '戊寅': 15, '己卯': 16, '庚辰': 17, '辛巳': 18, '壬午': 19,
-            '癸未': 20,
-            '甲申': 21, '乙酉': 22, '丙戌': 23, '丁亥': 24, '戊子': 25, '己丑': 26, '庚寅': 27, '辛卯': 28, '壬辰': 29,
-            '癸巳': 30,
-            '甲午': 31, '乙未': 32, '丙申': 33, '丁酉': 34, '戊戌': 35, '己亥': 36, '庚子': 37, '辛丑': 38, '壬寅': 39,
-            '癸卯': 40,
-            '甲辰': 41, '乙巳': 42, '丙午': 43, '丁未': 44, '戊申': 45, '己酉': 46, '庚戌': 47, '辛亥': 48, '壬子': 49,
-            '癸丑': 50,
-            '甲寅': 51, '乙卯': 52, '丙辰': 53, '丁巳': 54, '戊午': 55, '己未': 56, '庚申': 57, '辛酉': 58, '壬戌': 59,
-            '癸亥': 60
-        }
+
+    if en:
+        to_num = _GANZHI_PINYIN_TO_NUM
+        to_str = _NUM_TO_GANZHI_PINYIN
     else:
-        ganzhi_dict = {
-            'jiazi₀₁': 1, 'yichou₀₂': 2, 'bingyin₀₃': 3, 'dingmao₀₄': 4, 'wuchen₀₅': 5, 'jisi₀₆': 6, 'gengwu₀₇': 7,
-            'xinwei₀₈': 8, 'renshen₀₉': 9, 'guiyou₁₀': 10,
-            'jiaxu₁₁': 11, 'yihai₁₂': 12, 'bingzi₁₃': 13, 'dingchou₁₄': 14, 'wuyin₁₅': 15, 'jimao₁₆': 16,
-            'gengchen₁₇': 17, 'xinsi₁₈': 18, 'renwu₁₉': 19, 'guiwei₂₀': 20,
-            'jiashen₂₁': 21, 'yiyou₂₂': 22, 'bingxu₂₃': 23, 'dinghai₂₄': 24, 'wuzi₂₅': 25, 'jichou₂₆': 26,
-            'gengyin₂₇': 27, 'xinmao₂₈': 28, 'renchen₂₉': 29, 'guisi₃₀': 30,
-            'jiawu₃₁': 31, 'yiwei₃₂': 32, 'bingshen₃₃': 33, 'dingyou₃₄': 34, 'wuxu₃₅': 35, 'jihai₃₆': 36,
-            'gengzi₃₇': 37, 'xinchou₃₈': 38, 'renyin₃₉': 39, 'guimao₄₀': 40,
-            'jiachen₄₁': 41, 'yisi₄₂': 42, 'bingwu₄₃': 43, 'dingwei₄₄': 44, 'wushen₄₅': 45, 'jiyou₄₆': 46,
-            'gengxu₄₇': 47, 'xinhai₄₈': 48, 'renzi₄₉': 49, 'guichou₅₀': 50,
-            'jiayin₅₁': 51, 'yimao₅₂': 52, 'bingchen₅₃': 53, 'dingsi₅₄': 54, 'wuwu₅₅': 55, 'jiwei₅₆': 56,
-            'gengshen₅₇': 57, 'xinyou₅₈': 58, 'renxu₅₉': 59, 'guihai₆₀': 60
-        }
+        to_num = _GANZHI_ZH_TO_NUM
+        to_str = _NUM_TO_GANZHI_ZH
+
+    # string -> number
     if isinstance(input, str):
-        input = re.sub('景', '丙', input)
-        result = ganzhi_dict.get(input)
-    else:
-        try:
-            input = int(input)
-            input = int((input - 1) % 60 + 1)
-            for key, val in ganzhi_dict.items():
-                if val == int(input):
-                    result = key
-        except Exception:
-            pass
-    return result
+        s = input.strip()
+        # Normalise for Chen dynasty taboo
+        if not en:
+            s = re.sub('景', '丙', s)
+            return to_num.get(s, "ERROR")
+        else:
+            s = s.lower()
+            return to_num.get(s, "ERROR")
+
+    # number -> string
+    try:
+        n = int(input)
+    except (TypeError, ValueError):
+        return "ERROR"
+
+    return to_str.get(n, "ERROR")
 
 
 def numcon(x):
@@ -364,7 +382,7 @@ def numcon(x):
         return s
 
 
-def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=[1582, 10, 15]):
+def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=None):
     """
     Convert a date string (YYYY-MM-DD) to a Julian Day Number (JDN).
 
@@ -373,6 +391,10 @@ def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=[1582, 10
     :param gregorian_start: list
     :return: float (Julian Day Number) or None if invalid
     """
+    # Defaults
+    if gregorian_start is None:
+        gs = [1582, 10, 15]
+
     # Validate inputs
     if not re.match(r'^-?\d+-\d+-\d+$', date_string):
         return None
@@ -426,7 +448,7 @@ def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=[1582, 10
         return None
 
 
-def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=[1582, 10, 15]):
+def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=None):
     """
     Convert a Julian Day Number (JDN) to a date string (YYYY-MM-DD).
 
@@ -435,6 +457,10 @@ def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=[1582, 10, 15]):
     :param gregorian_start: list
     :return: str (ISO date string) or None if invalid
     """
+    # Defaults
+    if gregorian_start is None:
+        gs = [1582, 10, 15]
+
     # Get Gregorian reform JDN
     gregorian_start = sanitize_gs(gregorian_start)
     gs_str = f"{gregorian_start[0]}-{gregorian_start[1]}-{gregorian_start[2]}"
@@ -474,7 +500,7 @@ def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=[1582, 10, 15]):
         return None
 
 
-def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582, 10, 15], lang='en', civ=['c', 'j', 'k']):
+def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, lang='en', civ=None):
     """
     Convert Julian Day Number to Chinese calendar string.
     :param x: float (Julian Day Number) or str (ISO date string Y-M-D)
@@ -482,6 +508,12 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
+    # Defaults
+    if gregorian_start is None:
+        gs = [1582, 10, 15]
+    if civ is None:
+        civ = ['c', 'j', 'k']
+
     if lang == 'en':
         phrase_dic = phrase_dic_en
     else:
@@ -612,13 +644,17 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=[1582,
         return None
 
 
-def jy_to_ccs(y, lang='en', civ=['c', 'j', 'k']):
+def jy_to_ccs(y, lang='en', civ=None):
     """
     Convert Western year to Chinese calendar string.
     :param y: int
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
+    # Defaults
+    if civ is None:
+        civ = ['c', 'j', 'k']
+
     if lang == 'en':
         phrase_dic = phrase_dic_en
     else:
@@ -780,7 +816,7 @@ def strip_text(xml_string):
     return xml_string
 
 
-def tag_date_elements(text, civ=['c', 'j', 'k']):
+def tag_date_elements(text, civ=None):
     """
     Tag and clean Chinese string containing date with relevant elements for extraction. Each date element remains
     separated, awaiting "consolidation."
@@ -788,6 +824,10 @@ def tag_date_elements(text, civ=['c', 'j', 'k']):
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return: str (XML)
     """
+    # Defaults
+    if civ is None:
+        civ = ['c', 'j', 'k']
+
     bu = text
     # Retrieve tag tables
     era_tag_df = load_csv('era_table.csv')
@@ -1119,7 +1159,7 @@ def xml_to_table(text, filter=True):
     return text, list_for_df
 
 
-def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15], lang="en", tpq=-3000, taq=3000, jd_out=False, civ=['c', 'j', 'k']):
+def interpret_date(node, correct=True, implied=None, pg=False, gs=None, lang="en", tpq=-3000, taq=3000, jd_out=False, civ=None):
     """
     Filter strings and numbers in date to find matches.
 
@@ -1134,6 +1174,11 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return: df (DataFrame, output (str), implied (dict)
     """
+    # Defaults
+    if gs is None:
+        gs = [1582, 10, 15]
+    if civ is None:
+        civ = ['c', 'j', 'k']
 
     if lang == 'en':
         phrase_dic = phrase_dic_en
@@ -1837,7 +1882,13 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=[1582, 10, 15]
     return df, output, implied
 
 
-def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15], tpq=-3000, taq=3000, civ=['c', 'j', 'k']):
+def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-3000, taq=3000, civ=None):
+    # Defaults
+    if gs is None:
+        gs = [1582, 10, 15]
+    if civ is None:
+        civ = ['c', 'j', 'k']
+
     if lang == 'en':
         phrase_dic = phrase_dic_en
     else:
