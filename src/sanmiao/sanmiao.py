@@ -739,6 +739,22 @@ def jy_to_ccs(y, lang='en', civ=None):
         return None
 
 
+WS_RE = re.compile(r"\s+")
+
+
+def strip_ws_in_text_nodes(root: et._Element) -> et._Element:
+    """
+    Remove all Unicode whitespace in XML text content, but leave tags/attributes intact.
+    Applies to both .text and .tail.
+    """
+    for el in root.iter():
+        if el.text:
+            el.text = WS_RE.sub("", el.text)
+        if el.tail:
+            el.tail = WS_RE.sub("", el.tail)
+    return root
+
+
 def clean_attributes(xml_string):
     """
     Clean XML attributes of tags after regex tagging.
@@ -824,6 +840,12 @@ def tag_date_elements(text, civ=None):
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return: str (XML)
     """
+    # Test if input is XML, if not, wrap in <root> tags to make it XML
+    try:
+        et.ElementTree(et.fromstring(text)).getroot()
+    except et.XMLSyntaxError:
+        text = '<root>' + text + '</root>'
+    
     # Defaults
     if civ is None:
         civ = ['c', 'j', 'k']
@@ -928,17 +950,18 @@ def tag_date_elements(text, civ=None):
         find = r'</dyn></date>(之?初|中|之?末|之?季|末年|之?時|之世)'
         replace = r'</dyn><suffix>\1</suffix></date>'
         text = re.sub(find, replace, text)
-    if 'metadata' in text:
-        text = clean_attributes(text)
-    else:
-        text = '<root>' + text + '</root>'
+    # Clean XML attributes #############################################################################################
+    text = clean_attributes(text)
     # Clean nested tags ################################################################################################
-    # Convert to XML
+    # Parse XML
     try:
         xml_root = et.ElementTree(et.fromstring(text)).getroot()
     except Exception:
-        text = '<root>Oops</root>'
-        xml_root = et.ElementTree(et.fromstring(text)).getroot()
+        xml_root = et.ElementTree(et.fromstring('<root>Oops</root>')).getroot()
+    # Remove nested <date> tags
+    for node in xml_root.xpath('.//date//date'):
+        node.tag = 'to_remove'
+    et.strip_tags(xml_root, 'to_remove')
     # Iterate through nodes
     base_tags = ['year', 'int', 'month', 'day', 'gz', 'ruler', 'era', 'dyn', 'suffix', 'lp', 'sexYear', 'nmdgz', 'lp_filler']
     for tag in base_tags:
@@ -965,8 +988,10 @@ def consolidate_date(text):
     :return: str (XML)
     """
     bu = text
-    # Remove spaces and line breaks
-    text = re.sub(r'[\s\n\r]', '', text)
+    # Remove spaces
+    xml_root = et.ElementTree(et.fromstring(text)).getroot()
+    xml_root = strip_ws_in_text_nodes(xml_root)
+    text = et.tostring(xml_root, encoding='utf8').decode('utf8')
     ls = [
         ('dyn', 'ruler'),
         ('ruler', 'year'), ('ruler', 'era'),
@@ -1004,6 +1029,7 @@ def consolidate_date(text):
         et.ElementTree(et.fromstring(text)).getroot()
         return text
     except et.XMLSyntaxError:
+        print('error')
         return bu
 
 

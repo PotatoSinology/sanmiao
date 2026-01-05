@@ -36,7 +36,7 @@ Sanmiao uses the astronomical year, where 1 B.C. = 0, 100 B.C. = -99, etc. It 
 import sanmiao
 
 user_input = """
-東漢孝獻皇帝劉協建安十八年二月, 
+獻帝建安十八年二月, 
 宋太祖三年四月
 1313-12-10, -215-10-14
 415, -181
