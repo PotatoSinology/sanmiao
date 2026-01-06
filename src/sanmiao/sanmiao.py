@@ -53,8 +53,6 @@ data_dir = files("sanmiao") / "data"
 season_dic = {'春': 1, '夏': 2, '秋': 3, '冬': 4}
 lp_dic = {'朔': 0, '晦': -1}
 
-# TODO load tables only once
-
 
 simplified_only = set("宝応暦寿観斉亀")
 traditional_only = set("寶應曆壽觀齊龜")
@@ -1036,6 +1034,9 @@ def consolidate_date(text):
 def clean_nested_tags(text):
     xml_root = et.ElementTree(et.fromstring(text)).getroot()
     # Clean
+    for node in xml_root.xpath('.//date//date'):
+        node.tag = 'to_remove'
+    et.strip_tags(xml_root, 'to_remove')
     for tag in ['dyn', 'ruler', 'year', 'month', 'season', 'day', 'gz', 'lp', 'sexYear', 'nmdgz', 'lp_to_remove']:
         for node in xml_root.findall(f'.//{tag}//*'):
             node.tag = 'to_remove'
@@ -1064,7 +1065,7 @@ def clean_nested_tags(text):
     text = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
     return text
 
-
+# TODO: Remove this function
 def xml_to_table(text, filter=True):
     # Parse XML
     xml_root = et.ElementTree(et.fromstring(text)).getroot()
@@ -1074,9 +1075,9 @@ def xml_to_table(text, filter=True):
     implied = {}
     for node in xml_root.xpath('.//date'):
         # Blank dictionary
-        dic = {'index': ind, 'source_text': node.xpath('normalize-space(string())')}
+        dic = {'date_index': ind, 'source_text': node.xpath('normalize-space(string())')}
         # Set index
-        node.set('index', str(ind))
+        node.set('date_index', str(ind))
         ind += 1
         # Pull strings of dynasty, ruler, era
         d = node.xpath('.//dyn')
@@ -1185,7 +1186,7 @@ def xml_to_table(text, filter=True):
     return text, list_for_df
 
 
-def interpret_date(node, correct=True, implied=None, pg=False, gs=None, lang="en", tpq=-3000, taq=3000, jd_out=False, civ=None):
+def interpret_date(node, correct=False, implied=None, pg=False, gs=None, lang="en", tpq=-3000, taq=3000, jd_out=False, civ=None):
     """
     Filter strings and numbers in date to find matches.
 
@@ -1419,7 +1420,6 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=None, lang="en
                 sex_year = ganshu(year_string)
                 # Add attribute
                 node.set('sex_year', str(sex_year))
-                # Filter DataFrames TODO
                 # The year 4 is a jiazi year, so is -596
                 era_min = era_df['era_start_year'].min()
                 era_max = era_df['era_end_year'].max()
@@ -1824,12 +1824,18 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=None, lang="en
             if df.shape[0] > 15:
                 output += f'{phrase_dic.get("er")}: {df.shape[0]} {phrase_dic.get("matches").lower()}'
                 if not correct:
-                    df = pd.DataFrame([node.attrib])
+                    df = pd.DataFrame([node.attrib]).rename(columns={'index': 'date_index'})
                 else:
                     del df
                     df = pd.DataFrame()
             if df.empty and not correct:
-                df = pd.DataFrame([node.attrib])
+                if not era_df.empty:
+                    df = era_df.copy()
+                    for key, value in node.attrib.items():
+                        df[key] = value
+                else:
+                    df = pd.DataFrame([node.attrib]).rename(columns={'index': 'date_index'})
+                df['mismatch'] = True              
             else:
                 try:
                     # Add labels
@@ -1908,7 +1914,66 @@ def interpret_date(node, correct=True, implied=None, pg=False, gs=None, lang="en
     return df, output, implied
 
 
-def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-3000, taq=3000, civ=None):
+def index_date_nodes(xml_string) -> str:
+    """
+    Index date nodes in XML string.
+    """
+    xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
+    index = 0
+    for node in xml_root.xpath('.//date'):
+        node.set('index', str(index))
+        index += 1
+    xml_string = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
+    return xml_string
+
+
+def extract_date_table(xml_string, correct=False, pg=False, gs=None, lang='en', tpq=-3000, taq=3000, jd_out=False, civ=None):
+    """
+    
+    """
+    # Defaults
+    if gs is None:
+        gs = [1582, 10, 15]
+    if civ is None:
+        civ = ['c', 'j', 'k']
+
+    if lang == 'en':
+        phrase_dic = phrase_dic_en
+    else:
+        phrase_dic = phrase_dic_fr
+    
+    # Parse XML
+    xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
+
+    # Initialize output variables
+    report = ''
+    implied = None
+    output_df = None
+
+    for node in et.ElementTree(et.fromstring(xml_string)).getroot().xpath('.//date'):
+        # Interpret the date
+        df, st, implied = interpret_date(node, correct=correct, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, jd_out=jd_out, civ=civ)
+        
+        report += st + '\n\n'
+        
+        # Set index
+        df['date_index'] = node.attrib.get('index')
+
+        # Set node string
+        df['date_string'] = node.xpath('normalize-space(string())')
+
+        if output_df is None:
+            output_df = df
+        else:
+            output_df = pd.concat([output_df, df])
+    
+    # Return to XML string
+    xml_string = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
+
+    return xml_string, report, output_df
+
+# TODO: add 'correct' boolian to user input
+def cjk_date_interpreter(ui, correct=False,lang='en', jd_out=False, pg=False, gs=None, tpq=-3000, taq=3000, civ=None):
     # Defaults
     if gs is None:
         gs = [1582, 10, 15]
@@ -1925,6 +1990,8 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
     output_string = ''
     for item in items:
         if item != '':
+            # Determine input type 
+            
             # Find Chinese characters
             is_ccs = bool(re.search(r'[\u4e00-\u9fff]', item))
             # Find ISO strings
@@ -1948,11 +2015,12 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
                     item = float(item)
             except ValueError:
                 pass
-            # Proceed accordingly
+            
+            # Proceed according to input type
             if is_jdn or is_iso:
-                result = jdn_to_ccs(item, proleptic_gregorian=pg, gregorian_start=gs, lang=lang, civ=civ)
+                report = jdn_to_ccs(item, proleptic_gregorian=pg, gregorian_start=gs, lang=lang, civ=civ)
             elif is_y:
-                result = jy_to_ccs(item, lang=lang, civ=civ)
+                report = jy_to_ccs(item, lang=lang, civ=civ)
             elif is_ccs:
                 # Convert string to XML, tag all date elements
                 xml_string = tag_date_elements(item, civ=civ)
@@ -1960,18 +2028,17 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
                 xml_string = consolidate_date(xml_string)
                 # Remove non-date text
                 xml_string = strip_text(xml_string)
-                # Index XML, convert numbers, export list of dictionaries
-                xml_string, ls = xml_to_table(xml_string)
-                result = ''
-                implied = None
-                for node in et.ElementTree(et.fromstring(xml_string)).getroot().xpath('.//date'):
-                    # Interpret the date
-                    df, report, implied = interpret_date(node, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, jd_out=jd_out, civ=civ)
-                    result += report + '\n\n'
+                # Index date nodes
+                xml_string = index_date_nodes(xml_string)
+                # Extract DataFrame from XML
+                xml_string, report, df = extract_date_table(xml_string, correct=correct, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, jd_out=jd_out, civ=civ)
+                
+                # TODO: for XML tagging, should add filtering algorithm here
+                # TODO: for XML tagging, should implement ids from filtered results to XML here
             else:
-                result = f'{phrase_dic.get("ui")}: {item}\n{phrase_dic.get("nonsense")}'
-            if result is not None:
-                result = result.rstrip("\n")
-                output_string += result + '\n\n'
+                report = f'{phrase_dic.get("ui")}: {item}\n{phrase_dic.get("nonsense")}'
+            if report is not None:
+                report = report.rstrip("\n")
+                output_string += report + '\n\n'
     output_string = output_string.rstrip("\n")
     return output_string
