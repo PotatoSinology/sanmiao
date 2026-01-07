@@ -10,11 +10,12 @@ import lxml.etree as et
 from math import floor
 from functools import lru_cache
 
-# TODO add all possibilities for user filtering (web only)
-# TODO clean up code and comments
+# TODO add 'proliferate' all possibilities for user filtering (web only)
 # TODO testing in date extraction before anything else.
 # TODO clean up table output
+# TODO clean up code and comments
 # TODO add sequential mode to web app
+# TODO test intercalary month thing
 
 phrase_dic_en = {
     'ui': 'USER INPUT', 'matches': 'MATCHES', 'nonsense': 'ERROR: You did a nonsense',
@@ -2436,7 +2437,7 @@ def bulk_resolve_era_ids(df, era_df):
     return out
 
 
-def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df):
+def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_table, tpq=-3000, taq=3000, civ=None, proliferate=False):
     """
     Generate all possible dynasty/ruler/era combinations for each date.
     
@@ -2460,6 +2461,9 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df):
              date_index, dyn_id, ruler_id, era_id, cal_stream, era_start_year, era_end_year, max_year, etc.
     """
     out = df_with_ids.copy()
+    # Defaults
+    if civ is None:
+        civ = ['c', 'j', 'k']
     
     # We'll build candidate rows per date_index
     all_candidates = []
@@ -2486,6 +2490,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df):
                 'source_row': row
             })
         
+        
         # Skip if ALL IDs are None (no identifiers specified)
         # Don't generate candidates for every possible era
         all_none = all(
@@ -2494,23 +2499,60 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df):
             combo['era_id'] is None
             for combo in resolved_combinations
         )
-        
+    
         if all_none:
-            # No identifiers specified - create one row with empty IDs but preserve date info
-            first_row = date_rows.iloc[0]
-            candidate_row = {
-                'date_index': date_idx,
-                'dyn_id': None,
-                'ruler_id': None,
-                'era_id': None,
-            }
-            # Copy ALL date fields to preserve month, intercalary, day, etc.
-            for col in out.columns:
-                if col not in candidate_row and col != 'date_index':
-                    candidate_row[col] = first_row.get(col)
-            all_candidates.append(candidate_row)
+            if not proliferate:
+                first_row = date_rows.iloc[0]
+                candidate_row = {
+                    'date_index': date_idx,
+                    'dyn_id': None,
+                    'ruler_id': None,
+                    'era_id': None,
+                }
+                for col in out.columns:
+                    if col not in candidate_row and col != 'date_index':
+                        candidate_row[col] = first_row.get(col)
+                all_candidates.append(candidate_row)
+            else:
+                base = date_rows.copy()
+                base['_tmp'] = 1
+                master_table['_tmp'] = 1
+
+                date_rows = base.merge(master_table, on='_tmp').drop(columns=['_tmp'])
+
+                # Filter by civ
+                cal_streams = get_cal_streams_from_civ(civ)
+                if cal_streams is not None:
+                    date_rows = date_rows[date_rows['cal_stream'].isin(cal_streams)]
+
+                # Build ind_year
+                if date_rows['year'].dropna().empty:
+                    date_rows = date_rows.dropna(subset=['era_start_year', 'era_end_year'])
+                    date_rows['era_start_year'] = date_rows['era_start_year'].astype(int)
+                    date_rows['era_end_year'] = date_rows['era_end_year'].astype(int)
+
+                    date_rows['ind_year'] = [
+                        list(range(s, e + 1))
+                        for s, e in zip(date_rows['era_start_year'], date_rows['era_end_year'])
+                    ]
+                    date_rows = date_rows.explode('ind_year', ignore_index=True)
+                else:
+                    date_rows['ind_year'] = date_rows['year'] + date_rows['era_start_year'] - 1
+
+                # Filter by tpq / taq
+                date_rows = date_rows[
+                    (date_rows['ind_year'] >= tpq) &
+                    (date_rows['ind_year'] <= taq)
+                ]
+
+                date_rows['date_index'] = date_idx
+                date_rows = date_rows.drop(columns=['ind_year'], errors='ignore')
+
+                all_candidates.extend(date_rows.to_dict('records'))
+
             continue
-        
+
+            
         # Filter these combinations against the loaded tables to find valid ones
         valid_candidates = []
         seen_combinations = set()
@@ -2679,6 +2721,47 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df):
     
     return candidates_df
 
+
+def proliferate(date_rows, era_df, tpq, taq, civ):  # Zork
+    # TODO master table should be moved elsewhere to avoid re-loading it every time
+    master_table = era_df[['cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'era_start_year', 'era_end_year', 'era_start_jdn', 'era_end_jdn']].copy()
+
+    all_none = all(
+        combo['dyn_id'] is None and 
+        combo['ruler_id'] is None and 
+        combo['era_id'] is None
+        for combo in resolved_combinations
+    )
+
+    if all_none:            
+        # Merge date rows with master table
+        date_rows['_tmp'] = 1
+        master_table['_tmp'] = 1
+        date_rows = date_rows.merge(master_table, on='_tmp').drop(columns=['_tmp'])
+        
+        # Filter by civ
+        date_rows = date_rows[date_rows['cal_stream'].isin(get_cal_streams_from_civ(civ))]
+        # Filter by tpq and taq
+        if date_rows.dropna(subset=['year']).empty:
+            # Add a year for every year between start and end year
+            date_rows = date_rows.dropna(subset=['era_start_year', 'era_end_year'])
+            date_rows['era_start_year'] = date_rows['era_start_year'].astype(int)
+            date_rows['era_end_year'] = date_rows['era_end_year'].astype(int)
+            date_rows = (
+                date_rows.assign(ind_year=lambda x: x.apply(
+                    lambda r: list(range(r.era_start_year, r.era_end_year + 1)), axis=1
+                ))
+                .explode("ind_year")
+                .reset_index(drop=True)
+            )
+        else:
+            date_rows['ind_year'] = date_rows['year'] + date_rows['era_start_year'] - 1
+        
+        # Filter by tpq and taq
+        date_rows = date_rows[date_rows['ind_year'] >= tpq]
+        date_rows = date_rows[date_rows['ind_year'] <= taq]
+
+    return date_rows
 
 def preference_filtering_bulk(table, implied):
     """
@@ -3127,6 +3210,7 @@ def solve_date_with_lunar_constraints(g, implied, phrase_dic, ruler_can_names, d
                     df = g.copy()
                     df['error_str'] += "year-month mismatch; "
     else:
+        print(df.to_string())
         # TODO this will require debugging with specific examples
         # For intercalary months or when no month constraint, just update the columns
         df['month'] = df['lunar_month']
@@ -3299,7 +3383,7 @@ def solve_date_with_lunar_constraints(g, implied, phrase_dic, ruler_can_names, d
     return df, updated_implied
 
 
-def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000, taq=3000, jd_out=False, civ=None, tables=None, sequential=True):
+def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000, taq=3000, jd_out=False, civ=None, tables=None, sequential=True, proliferate=False):
     """
     Optimized bulk version of extract_date_table using pandas operations.
     
@@ -3347,6 +3431,7 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     if tables is None:
         tables = prepare_tables(civ=civ)
     era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
+    master_table = era_df[['cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'era_start_year', 'era_end_year', 'era_start_jdn', 'era_end_jdn']].copy()
     
     # Step 4: Bulk resolve IDs (Phase 1)
     df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
@@ -3354,7 +3439,7 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     df = bulk_resolve_era_ids(df, era_df)
     
     # Step 5: Bulk generate candidates (Phase 2)
-    df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df)
+    df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
     
     # Drop string columns that are no longer needed after ID resolution
     string_columns_to_drop = ['dyn_str', 'ruler_str', 'era_str', 'year_str', 'sexYear_str',
@@ -3488,7 +3573,22 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
     :return: Formatted report string
     """
     if output_df.empty:
-        return "No matches found"
+        return f'{phrase_dic["ui"]}: unknown date\n{phrase_dic["matches"]}:\nNo matches found'
+
+    # Check if any rows have resolved historical entities (dyn_id, ruler_id, or era_id)
+    has_resolved_entities = (
+        ('dyn_id' in output_df.columns and output_df['dyn_id'].notna().any()) or
+        ('ruler_id' in output_df.columns and output_df['ruler_id'].notna().any()) or
+        ('era_id' in output_df.columns and output_df['era_id'].notna().any())
+    )
+
+    if not has_resolved_entities:
+        # Format as a proper report entry
+        if not output_df.empty and 'date_string' in output_df.columns:
+            date_string = output_df['date_string'].iloc[0]
+        else:
+            date_string = "unknown date"
+        return f'{phrase_dic["ui"]}: {date_string}\n{phrase_dic["matches"]}:\nInsufficient data: please add a ruler or era'
 
     # Prepare dataframe for vectorized formatting
     df = output_df.copy()
@@ -3626,7 +3726,7 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
     return "\n\n".join(report_blocks)
 
 
-def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-3000, taq=3000, civ=None, sequential=True):
+def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-3000, taq=3000, civ=None, sequential=True, proliferate=False):
     # Start overall timing
     start_time = time.time()
     timing_info = {}
@@ -3661,7 +3761,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
         # Extract dates using optimized bulk function
         xml_string, output_df = extract_date_table_bulk(
             xml_string, pg=pg, gs=gs, lang=lang,
-            tpq=tpq, taq=taq, jd_out=jd_out, civ=civ, tables=tables, sequential=sequential
+            tpq=tpq, taq=taq, jd_out=jd_out, civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
         )
 
         # Extract tables for canonical name addition
@@ -3712,7 +3812,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
                 # Extract dates using optimized bulk function
                 xml_string, output_df = extract_date_table_bulk(
                     xml_string, pg=pg, gs=gs, lang=lang,
-                    tpq=tpq, taq=taq, jd_out=jd_out, civ=civ, tables=tables, sequential=False
+                    tpq=tpq, taq=taq, jd_out=jd_out, civ=civ, tables=tables, sequential=False, proliferate=proliferate
                 )
 
                 # Extract tables for canonical name addition
