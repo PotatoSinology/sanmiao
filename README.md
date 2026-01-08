@@ -30,7 +30,7 @@ pip3 install -U sanmiao
 
 ## Using Sanmiao
 
-Sanmiao uses the astronomical year, where 1 B.C. = 0, 100 B.C. = -99, etc. It recognises years (e.g., 534), Y-M-D date strings (e.g., -99-3-5, 1532-6-4), Julian Day Numbers (e.g., 1684971.5), and Chinese date strings of differing precision and completeness (e.g., "東漢孝獻皇帝劉協建安十八年二月," "太祖元年," or "三年三月甲申"). These should be separated by commas, semicolons, or line breaks:
+Sanmiao provides a variety of functions for date conversion, which are aggregated in `sanmiao.cjk_date_interpreter()`, which is the back-end for the user-friendly [Sanmiao web app](https://norbert.huma-num.fr/en/sanmiao/index.html). The function `sanmiao.cjk_date_interpreter()` recognises years (e.g., 534), Y-M-D date strings (e.g., -99-3-5, 1532-6-4), Julian Day Numbers (e.g., 1684971.5), and Chinese date strings of differing precision and completeness (e.g., "東漢孝獻皇帝劉協建安十八年二月," "太祖元年," or "三年三月甲申"). These should be separated by commas, semicolons, or line breaks:
 
 ```Python
 import sanmiao
@@ -45,15 +45,56 @@ result = sanmiao.cjk_date_interpreter(user_input)
 print(result)
 ```
 
-By default, the output is set to English ('en') and ISO time strings, the proleptic Gregorian calendar is disabled, the Gregorian calendar start date is set to 1582-10-15, and the date filter is set to -3000 to 3000: 
+Note that Sanmiao uses the astronomical year, where 1 B.C. = 0, 100 B.C. = -99, etc. The function `sanmiao.cjk_date_interpreter()` has the following parameters and defaults passed to its sub-functions: 
 
 ```Python
-result = sanmiao.cjk_date_interpreter(user_input, lang='en', jd_out=False, pg=False, gs=[1582, 10, 15], tpq=-3000, taq=3000)
+result = sanmiao.cjk_date_interpreter(
+    user_input,  # User input, accepts strings
+    lang='en',  # Lanuage, currently accepts 'en' and 'fr'
+    jd_out=False,  # Julian Day Number in output reports (vs ISO date string)
+    pg=False,  # Proleptic Gregorian calendar
+    gs=None,  # Start of Gregorian calendar, defaults to [1582, 10, 15] if None
+    tpq=-3000,  # Terminus post quem
+    taq=3000,  # Terminus ante quem
+    civ=None,  # Civilisation/s, defaults to ['c', 'j', 'k'] if None; set to ['j'] for Japan only
+    sequential=True,  # Intelligently fills missing fields in Sinitic date strings from previous ones
+    proliferate=True  # Finds all candidates for date strings without dynasty, ruler, or era;
+    )
+```
+
+Sanmiao works via XML tagging, and its subcomponents are designed to function independantly of `sanmiao.cjk_date_interpreter()`. The block of functions that handle XML tagging and table extraction are:
+
+```
+# Convert string to XML (if necessary), tag all date elements
+xml_string = tag_date_elements(text, civ=civ)
+
+# Consolidate adjacent date elements
+xml_string = consolidate_date(xml_string)
+
+# Index date nodes
+xml_string = index_date_nodes(xml_string)
+
+# Load calendar tables
+tables = prepare_tables(civ=civ)
+
+# Extract dates using optimized bulk function
+xml_string, output_df, implied = extract_date_table_bulk(
+    xml_string, implied=implied, pg=pg, gs=gs, lang=lang,
+    tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=False, proliferate=proliferate
+)
 ```
 
 ## Sources
 
-Sanmiao uses historical tables based on those of Zhang Peiyu[^1] and Uchida Masao,[^2] and it is updated to include new archaeological evidence[^3] as well as minor dynasties and reign eras. The tables are based on calculation from contemporary procedure texts (_lifa_ 曆法), eclipses, and recorded dates. I plan to expand them in future versions to include Korean tables and independently calculated new moons for minor dynasties running different calendars. I also plan to supply additional data outputs by way of supporting evidence, comparison with alternatives, and documentation detailing the considerations that went into my choices.
+Sanmiao uses historical tables based on those of Zhang Peiyu[^1] and Uchida Masao,[^2] and it is updated to include new archaeological evidence[^3] as well as minor dynasties and reign eras. The tables are based on calculation from contemporary procedure texts (_lifa_ 曆法), eclipses, and recorded dates. I have supplemented these for the moment with tables from the [Buddhist Studies Time Authority Databases](https://authority.dila.edu.tw/time/) for the Sun-Wu, Liu-Shu, Liao, Jin, and Korea.
+
+In future versions, I plan to:
+
+- improve tables and functionalities
+- supply supporting textual evidence to table items and, somehow, outputted reports
+- provide a concorance and critical comparison of the aforementioned tables, textual evidence, and calculations using contemporary procedure texts
+- add Vietnamese tables with the aid of Phạm Vũ Lộc 范武禄
+- add Chinese, Japanese, and Vietnamese translations to outputs and to the web app
 
 [^1]: Zhang Peiyu 張培瑜, _Sanqianwubai nian liri tianxiang_ 三千五百年曆日天象 (Zhengzhou: Daxiang chubanshe, 1997).
 [^2]: Uchida Masao, _Nihon rekijitsu genten_ 日本暦日原典 (Tōkyō : Yūzankaku shuppan , 1975).
