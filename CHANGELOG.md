@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.7] - 2025-01-08
+## [0.1.8] - 2025-01-08
 
 ### Changed
 - Rewrote codebase to increase speed
@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - Added comprehensive docstrings to all functions that were missing them
+
+## [0.1.7] - 2025-12-30
+
+### Changed
+- Add lru_cache to CSV loading
+- Remove mutable defaults and global warning suppression
+- Move ganshi mappings to module scope
 
 ## [0.1.6] - 2025-12-30
 
@@ -41,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.7...HEAD
+[0.1.8]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.4...v0.1.5
