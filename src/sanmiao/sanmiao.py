@@ -4,18 +4,11 @@ except ImportError:
     from importlib_resources import files
 import re
 import time
-import numpy as np
 import pandas as pd
 import lxml.etree as et
 from math import floor
 from functools import lru_cache
-import sys
 
-# TODO fully re-implement sexagenary year calculation
-# TODO testing in date extraction before anything else.
-# TODO clean up table output
-# TODO clean up code and comments
-# TODO test intercalary month thing
 # TODO add sequential mode to web app
 
 phrase_dic_en = {
@@ -62,12 +55,22 @@ data_dir = files("sanmiao") / "data"
 season_dic = {'春': 1, '夏': 2, '秋': 3, '冬': 4}
 lp_dic = {'朔': 0, '晦': -1}
 
+# Defaults
+DEFAULT_TPQ = -3000
+DEFAULT_TAQ = 3000
+DEFAULT_GREGORIAN_START = [1582, 10, 15]
 
 simplified_only = set("宝応暦寿観斉亀")
 traditional_only = set("寶應曆壽觀齊龜")
 
 
 def guess_variant(text):
+    """
+    Guess whether text uses traditional or simplified Chinese characters.
+
+    :param text: str, text to analyze
+    :return: str, '1' for traditional, '3' for simplified, '0' for mixed/unknown
+    """
     s_count = sum(ch in simplified_only for ch in text)
     t_count = sum(ch in traditional_only for ch in text)
     if t_count > s_count:
@@ -83,9 +86,8 @@ def sanitize_gs(gs):
     Return a list [year, month, day] of ints if valid,
     otherwise the default [1582, 10, 15].
     """
-    default = [1582, 10, 15]
     if not isinstance(gs, (list, tuple)):
-        return default
+        return DEFAULT_GREGORIAN_START
     if len(gs) != 3:
         return default
     try:
@@ -97,6 +99,13 @@ def sanitize_gs(gs):
 
 @lru_cache(maxsize=None)
 def _load_csv_cached(csv_name: str) -> pd.DataFrame:
+    """
+    Load CSV file from package data with caching.
+
+    :param csv_name: str, name of the CSV file to load
+    :return: pd.DataFrame, loaded CSV data
+    :raises FileNotFoundError: if CSV file is not found
+    """
     csv_path = data_dir / csv_name
     try:
         return pd.read_csv(csv_path, index_col=False, encoding="utf-8")
@@ -113,6 +122,12 @@ def load_csv(csv_name: str) -> pd.DataFrame:
 
 
 def prepare_tables(civ=None):
+    """
+    Load and prepare all necessary tables for date processing.
+
+    :param civ: list or str, civilization codes to filter by ('c', 'j', 'k')
+    :return: tuple of DataFrames (era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names)
+    """
     # Default civilisations
     if civ is None:
         civ = ['c', 'j', 'k']
@@ -156,6 +171,12 @@ def get_cal_streams_from_civ(civ):
 
 
 def load_num_tables(civ=None):
+    """
+    Load and filter numerical tables (era, dynasty, ruler, lunar) by civilization.
+
+    :param civ: list or str, civilization codes to filter by ('c', 'j', 'k')
+    :return: tuple of DataFrames (era_df, dyn_df, ruler_df, lunar_table)
+    """
     # Default civilisations
     if civ is None:
         civ = ['c', 'j', 'k']
@@ -190,6 +211,12 @@ def load_num_tables(civ=None):
 
 
 def load_tag_tables(civ=None):
+    """
+    Load and filter tag tables (dynasty_tags, ruler_tags) by civilization.
+
+    :param civ: list or str, civilization codes to filter by ('c', 'j', 'k')
+    :return: tuple of DataFrames (dyn_tag_df, ruler_tag_df)
+    """
     # Default civilisations
     if civ is None:
         civ = ['c', 'j', 'k']
@@ -263,10 +290,10 @@ _GANZHI_PINYIN_TO_NUM = {
 _NUM_TO_GANZHI_PINYIN = {v: k for k, v in _GANZHI_PINYIN_TO_NUM.items()}
 
 
-def ganshu(input, en=False):
+def ganshu(gz_in, en=False):
     """
     Convert from sexagenary counter (string) to number (int) and vice versa.
-    :param input: str, int, or float
+    :param gz_in: str, int, or float
     :param en: Boolean, whether into Pinyin (vs Chinese)
     :return: int or str
     """
@@ -279,8 +306,8 @@ def ganshu(input, en=False):
         to_str = _NUM_TO_GANZHI_ZH
 
     # string -> number
-    if isinstance(input, str):
-        s = input.strip()
+    if isinstance(gz_in, str):
+        s = gz_in.strip()
         # Normalise for Chen dynasty taboo
         if not en:
             s = re.sub('景', '丙', s)
@@ -291,7 +318,7 @@ def ganshu(input, en=False):
 
     # number -> string
     try:
-        n = int(input)
+        n = int(gz_in)
     except (TypeError, ValueError):
         return "ERROR"
 
@@ -414,7 +441,7 @@ def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=None):
     """
     # Defaults
     if gregorian_start is None:
-        gs = [1582, 10, 15]
+        gregorian_start = DEFAULT_GREGORIAN_START
 
     # Validate inputs
     if not re.match(r'^-?\d+-\d+-\d+$', date_string):
@@ -480,7 +507,7 @@ def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=None):
     """
     # Defaults
     if gregorian_start is None:
-        gs = [1582, 10, 15]
+        gregorian_start = DEFAULT_GREGORIAN_START
 
     # Get Gregorian reform JDN
     gregorian_start = sanitize_gs(gregorian_start)
@@ -526,12 +553,15 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, 
     Convert Julian Day Number to Chinese calendar string.
     :param x: float (Julian Day Number) or str (ISO date string Y-M-D)
     :param by_era: bool (filter from era JDN vs index year)
+    :param proleptic_gregorian: bool
+    :param gregorian_start: list
+    :param lang: str, language ('en' or 'fr')
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
     # Defaults
     if gregorian_start is None:
-        gs = [1582, 10, 15]
+        gregorian_start = DEFAULT_GREGORIAN_START
     if civ is None:
         civ = ['c', 'j', 'k']
 
@@ -598,7 +628,20 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, 
         lunar_table = lunar_table[lunar_table['era_end_year'] > lunar_table['ind_year']]
         del lunar_table['era_end_year']
     if not lunar_table.empty:
-        lunar_table = lunar_table.sort_values(by=['cal_stream', 'dyn_id'])
+        lunar_table = lunar_table.sort_values(by=['cal_stream', 'dyn_id'])        
+        """
+        Note: where era and ruler start years differ, I sometimes get duplicates:
+
+        ,dyn_id,cal_stream,era_id,ruler_id,era_name,era_start_year,ruler_name,dyn_name,ind_year,year_gz,month,intercalary,nmd_gz,nmd_jdn,hui_jdn,max_day,hui_gz,emp_start_year
+        0,124,3.0,636,15353.0,至正,1341,順帝妥懽帖睦爾,元,1342,19,1,0,10,2211259.5,2211287.5,29.0,辛丑,1333.0
+        1,133,4.0,930,16394.0,興国,1340,後村上天皇,日本,1342,19,1,0,10,2211259.5,2211288.5,30.0,壬寅,1339.0
+        2,133,4.0,939,16398.0,暦応,1338,光明天皇,日本,1342,19,1,0,10,2211259.5,2211288.5,30.0,壬寅,1336.0
+        3,141,8.0,1175,16597.0,後元,1340,忠惠王,高麗,1342,19,1,0,10,2211259.5,2211287.5,29.0,辛丑,1331.0
+        4,141,8.0,1175,16597.0,後元,1340,忠惠王,高麗,1342,19,1,0,10,2211259.5,2211287.5,29.0,辛丑,1340.0
+
+        This merits rethinking, but the following will work for now.
+        """
+        lunar_table = lunar_table.drop_duplicates(subset=['era_id'])
         # Create strings
         for index, row in lunar_table.iterrows():
             # Output dynasty and ruler name
@@ -669,6 +712,7 @@ def jy_to_ccs(y, lang='en', civ=None):
     """
     Convert Western year to Chinese calendar string.
     :param y: int
+    :param lang: str, language ('en' or 'fr')
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
@@ -866,13 +910,13 @@ YEAR_RE   = re.compile(r"((?:[一二三四五六七八九十]+|元)[年載])")
 
 # Months: order matters (more specific first)
 LEAPMONTH_RE1 = re.compile(r"閏月")
-LEAPMONTH_RE2 = re.compile(r"閏((?:十有[一二]|正)[月])")
-LEAPMONTH_RE3 = re.compile(r"閏((?:[一二三四五六七八九十]+|正)[月])")
-MONTH_RE1     = re.compile(r"((?:十有[一二]|正)[月])")
-MONTH_RE2     = re.compile(r"((?:[一二三四五六七八九十]+|正)[月])")
+LEAPMONTH_RE2 = re.compile(r"閏((?:十有[一二]|正)月)")
+LEAPMONTH_RE3 = re.compile(r"閏((?:[一二三四五六七八九十]+|正)月)")
+MONTH_RE1     = re.compile(r"((?:十有[一二]|正)月)")
+MONTH_RE2     = re.compile(r"((?:[一二三四五六七八九十]+|正)月)")
 
 DAY_RE    = re.compile(r"(([廿卅卌卄丗一二三四五六七八九十]+)日)")
-GZ_RE     = re.compile(r"([甲乙丙景丁戊己庚辛壬癸景][子丑寅卯辰巳午未申酉戌亥])")
+GZ_RE     = re.compile(r"([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
 SEASON_RE = re.compile(r"([春秋冬夏])")
 
 LP_RE = re.compile(r"([朔晦])")
@@ -968,6 +1012,13 @@ def replace_in_text_and_tail(
                     changed = True
                     
 def make_simple_date(tagname, group=1):
+    """
+    Create a function that generates XML date elements with specified tag.
+
+    :param tagname: str, XML tag name for the date element
+    :param group: int, regex group number to extract text from
+    :return: function that creates XML date elements
+    """
     def _mk(m):
         d = et.Element("date")
         c = et.SubElement(d, tagname)
@@ -976,19 +1027,37 @@ def make_simple_date(tagname, group=1):
     return _mk
 
 def make_leap_month_exact_monthtext(month_text: str):
+    """
+    Create XML element for leap month with specific month text.
+
+    :param month_text: str, text for the month element
+    :return: et.Element, XML date element for leap month
+    """
     d = et.Element("date")
     i = et.SubElement(d, "int"); i.text = "閏"
     m = et.SubElement(d, "month"); m.text = month_text
     return d
 
 def make_leapmonth_from_group1(m):
+    """
+    Create leap month element from regex match group 1.
+
+    :param m: regex match object
+    :return: et.Element, XML date element for leap month
+    """
     return make_leap_month_exact_monthtext(m.group(1))
 
-def make_leapmonth_yue(m):
+def make_leapmonth_yue():
     # "閏月" -> <date><int>閏</int><month>月</month></date>
     return make_leap_month_exact_monthtext("月")
 
 def tag_basic_tokens(xml_root):
+    """
+    Tag basic date tokens (year, month, day, etc.) in XML tree.
+
+    :param xml_root: et.Element, root of XML tree to process
+    :return: et.Element, modified XML root with tagged date elements
+    """
     # year
     replace_in_text_and_tail(xml_root, YEAR_RE, make_simple_date("year"), skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
 
@@ -1010,9 +1079,13 @@ def tag_basic_tokens(xml_root):
 
 SEX_YEAR_PREFIX_RE = re.compile(r"(歲[次在])\s*$")
 
-SEX_YEAR_PREFIX_RE = re.compile(r"(歲[次在])\s*$")
-
 def promote_gz_to_sexyear(xml_root):
+    """
+    Promote sexagenary day (gz) elements to sexagenary year (sexYear) when preceded by year markers.
+
+    :param xml_root: et.Element, root of XML tree to process
+    :return: et.Element, modified XML root
+    """
     for d in xml_root.xpath(".//date[gz]"):
         prev = d.getprevious()
         if prev is None:
@@ -1048,6 +1121,12 @@ def promote_gz_to_sexyear(xml_root):
 PUNCT_RE = re.compile(r"^[，,、\s]*")
 
 def promote_nmdgz(xml_root):
+    """
+    Promote sexagenary day (gz) elements to numbered month day gz (nmdgz) when followed by day elements.
+
+    :param xml_root: et.Element, root of XML tree to process
+    :return: et.Element, modified XML root
+    """
     for gz_date in list(xml_root.xpath(".//date[gz]")):
         parent = gz_date.getparent()
         gz_text = gz_date.findtext("gz")
@@ -1310,11 +1389,16 @@ def consolidate_date(text):
         et.ElementTree(et.fromstring(text)).getroot()
         return text
     except et.XMLSyntaxError:
-        print('error')
         return bu
 
 
 def clean_nested_tags(text):
+    """
+    Clean nested and invalid date tags from XML string.
+
+    :param text: str, XML string with date tags
+    :return: str, cleaned XML string
+    """
     xml_root = et.ElementTree(et.fromstring(text)).getroot()
     # Clean
     for node in xml_root.xpath('.//date//date'):
@@ -1349,755 +1433,6 @@ def clean_nested_tags(text):
     return text
 
 
-
-# ============================================================================
-# ORIGINAL IMPLEMENTATION - Kept for reference
-# ============================================================================
-# This function has been replaced by the bulk optimization approach
-# (extract_date_table_bulk) which uses pandas operations for better performance.
-# Keeping this commented out for reference and debugging purposes.
-# ============================================================================
-
-# def interpret_date(node, correct=False, implied=None, pg=False, gs=None, lang="en", tpq=-3000, taq=3000, jd_out=False, civ=None, tables=None):
-#     """
-#     Filter strings and numbers in date to find matches.
-#
-#     :param node: XML node
-#     :param correct: bool
-#     :param implied: dict
-#     :param pg: bool
-#     :param gs: list (YYYY, MM, DD)
-#     :param lang: str
-#     :param tpq: int
-#     :param taq: int
-#     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
-#     :return: df (DataFrame, output (str), implied (dict)
-#     """
-    if tables is None:
-        era_df, dyn_df, ruler_df, lunar_table = load_num_tables(civ=civ)
-        dyn_tag_df, ruler_tag_df = load_tag_tables(civ=civ)
-        ruler_can_names = load_csv('rul_can_name.csv')[['person_id', 'string']]
-    else:
-        era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
-
-    # IMPORTANT: because interpret_date mutates/filters these,
-    # use cheap views/copies where needed:
-    era_df = era_df.copy()
-    dyn_df = dyn_df.copy()
-    ruler_df = ruler_df.copy()
-    lunar_table = lunar_table.copy()
-    dyn_tag_df = dyn_tag_df.copy()
-    ruler_tag_df = ruler_tag_df.copy()
-    
-    # Defaults
-    if gs is None:
-        gs = [1582, 10, 15]
-    if civ is None:
-        civ = ['c', 'j', 'k']
-
-    if lang == 'en':
-        phrase_dic = phrase_dic_en
-    else:
-        phrase_dic = phrase_dic_fr
-    # Error check on Gregorian start date
-    gs = sanitize_gs(gs)
-    # Retrieve tables
-    dyn_can_names = dyn_df[['dyn_id', 'dyn_name']].copy().drop_duplicates()
-    rul_dyn = ruler_df[['person_id', 'dyn_id']].copy().rename(columns={'person_id': 'ruler_id'})
-
-    def preference_filtering(table):
-        if table.shape[0] < 2:
-            return table
-        else:
-            bu = table.copy()
-            era_id_ls = implied.get('era_id_ls')
-            # to-do This doesn't work for emperors without eras
-            if 'era_id' in table.columns and len(era_id_ls) > 0:
-                table = table[table['era_id'].isin(era_id_ls)]
-                if table.empty:
-                    del table
-                    table = bu.copy()
-                else:
-                    bu = table.copy()
-            ruler_id_ls = implied.get('ruler_id_ls')
-            if 'ruler_id' in table.columns and len(ruler_id_ls) > 0:
-                table = table[table['ruler_id'].isin(ruler_id_ls)]
-                if table.empty:
-                    del table
-                    table = bu.copy()
-                else:
-                    bu = table.copy()
-            dyn_id_ls = implied.get('dyn_id_ls')
-            if 'dyn_id' in table.columns and len(dyn_id_ls) > 0:
-                table = table[table['dyn_id'].isin(dyn_id_ls)]
-                if table.empty:
-                    del table
-                    table = bu.copy()
-                else:
-                    bu = table.copy()
-            mn = implied.get('month')
-            if 'month' in table.columns and mn is not None:
-                # Test if already filtered for month
-                if table.shape[0] > 1:
-                    mos = table.dropna(subset=['month']).month.unique()
-                    if len(mos) > 1:
-                        table = table[table['month'] == mn]
-                    if table.empty:
-                        del table
-                        table = bu.copy()
-                    else:
-                        bu = table.copy()
-            inter = implied.get('intercalary')
-            if 'intercalary' in table.columns and inter is not None:
-                # Test if already filtered for intercalary
-                if table.shape[0] > 1:
-                    intercalarys = table.dropna(subset=['intercalary']).intercalary.unique()
-                    if len(intercalarys) > 1:
-                        table = table[table['intercalary'] == inter]
-                    if table.empty:
-                        del table
-                        table = bu.copy()
-                    else:
-                        bu = table.copy()
-            table = table.drop_duplicates()
-            return table
-
-
-    def add_can_names(table):
-        nonlocal ruler_can_names
-        table = table.reset_index(drop=True)
-        # If dyn_id missing
-        a = table[table['dyn_id'].isna()].copy()
-        if not a.empty:
-            del a['dyn_id']
-            a = a.merge(rul_dyn, how='left', on='ruler_id')
-            b = table.dropna(subset=['dyn_id'])
-            table = pd.concat([a, b])
-        # Filter ruler_can_names by filtered rulers
-        # Note: ruler_df may have 'person_id' or 'ruler_id' depending on where we are in the function
-        if not ruler_df.empty:
-            if 'person_id' in ruler_df.columns:
-                valid_person_ids = ruler_df['person_id'].unique()
-            elif 'ruler_id' in ruler_df.columns:
-                valid_person_ids = ruler_df['ruler_id'].unique()
-            else:
-                valid_person_ids = []
-            if len(valid_person_ids) > 0:
-                ruler_can_names = ruler_can_names[ruler_can_names['person_id'].isin(valid_person_ids)]
-        temp = ruler_can_names.rename(columns={'person_id': 'ruler_id', 'string': 'ruler_name'})
-        table = table.merge(temp, how='left', on='ruler_id')
-        table = table.merge(dyn_can_names, how='left', on='dyn_id')
-        return table
-
-
-    output = f'{phrase_dic.get("ui")}: {node.xpath("normalize-space(string())").replace(" ", "")}\n{phrase_dic.get("matches")}:\n'
-    year = None
-    if implied is None:
-        implied = {
-            'dyn_id_ls': [],
-            'ruler_id_ls': [],
-            'era_id_ls': []
-        }
-    # Look for dynasty
-    dyn_tags = node.xpath('.//dyn')
-    if len(dyn_tags) > 0:
-        dyn_id = dyn_tags[0].attrib.get('dyn_id')
-        if dyn_id is not None:
-            if '|' in dyn_id:
-                dyn_ids = re.split('|', dyn_id)
-            else:
-                dyn_ids = [int(dyn_id)]
-        else:
-            dyn_string = dyn_tags[0].xpath('string()')
-            # Find ids
-            dyn_tag_df = dyn_tag_df[dyn_tag_df['string'] == dyn_string]
-            dyn_ids = dyn_tag_df.dyn_id.to_list()
-        # Filter DataFrames
-        dyn_df = dyn_df[dyn_df['dyn_id'].isin(dyn_ids) | dyn_df['part_of'].isin(dyn_ids)]
-        dyn_ids = dyn_df.dyn_id.to_list() + dyn_df.part_of.to_list()
-        ls = []
-        for dyn_id in dyn_ids:
-            try:
-                ls.append(int(dyn_id))
-            except ValueError:
-                pass
-        ruler_df = ruler_df[ruler_df['dyn_id'].isin(dyn_ids)]
-        era_df = era_df[era_df['dyn_id'].isin(dyn_ids)]
-    # Look for ruler
-    ruler_tags = node.xpath('.//ruler')
-    if len(ruler_tags) > 0:
-        ruler_id = ruler_tags[0].attrib.get('ruler_id')
-        if ruler_id is not None:
-            ruler_ids = [int(float(ruler_id))]
-        else:
-            ruler_string = ruler_tags[0].xpath('string()')
-            # Find ids
-            ruler_tag_df = ruler_tag_df[ruler_tag_df['string'] == ruler_string]
-            ruler_ids = ruler_tag_df.person_id.unique()
-        # Filter DataFrames
-        ruler_df = ruler_df[ruler_df['person_id'].isin(ruler_ids)]
-        era_df = era_df[era_df['ruler_id'].isin(ruler_ids)]
-        dyn_ids = ruler_df.dyn_id.unique()
-        dyn_df = dyn_df[dyn_df['dyn_id'].isin(dyn_ids)]
-        # Errors:
-        if ruler_df.empty:
-            output += f'{phrase_dic.get("rule-dyn")}\n'
-    # Look for era
-    era_tags = node.xpath('.//era')
-    if len(era_tags) > 0:
-        era_id = era_tags[0].attrib.get('era_id')
-        if era_id is not None:
-            era_ids = [int(era_id)]
-        else:
-            era_string = era_tags[0].xpath('string()')
-            # Find ids
-            era_df = era_df[era_df['era_name'] == era_string]
-            era_ids = era_df.era_id.unique()
-        # Filter DataFrames
-        era_df = era_df[era_df['era_id'].isin(era_ids)]
-        ruler_ids = era_df.ruler_id.unique()
-        ruler_df = ruler_df[ruler_df['person_id'].isin(ruler_ids)]
-        dyn_ids = era_df.dyn_id.unique()
-        dyn_df = dyn_df[dyn_df['dyn_id'].isin(dyn_ids)]
-        if era_df.empty:
-            output += f'{phrase_dic.get("era-rule")}\n'
-    # Look for year
-    year_tags = node.xpath('.//year')
-    if len(year_tags) > 0:
-        year_num = year_tags[0].attrib.get('year')
-        if year_num is not None:
-            year = int(float(year_num))
-        else:
-            try:
-                year_string = year_tags[0].xpath('string()')
-                year = int(numcon(year_string))
-                # Add attribute
-                node.set('year', str(year))
-                # Filter DataFrames
-                era_df = era_df[era_df['max_year'] >= year]
-                ruler_df = ruler_df[ruler_df['max_year'] >= year]
-                if ruler_df.empty:
-                    output += f'{phrase_dic.get("rule-reign")}\n'
-                # Test if there is anything Han or earlier
-                test = dyn_df[dyn_df['dyn_id'] <= 43]
-                if era_df.empty and not test.empty:
-                    output += f'{phrase_dic.get("era-year")}\n'
-            except ValueError:
-                pass
-        if implied.get('year') != year:
-            implied.update({
-                'year': None,
-                'month': None,
-                'intercalary': None
-            })
-    else:
-        year = None
-    # Look for sexagenary year NEW
-    year_tags = node.xpath('.//sexYear')
-    if len(year_tags) > 0:
-        year_num = year_tags[0].attrib.get('sexYear')
-        if year_num is not None:
-            sex_year = int(float(year_num))
-        else:
-            try:
-                year_string = year_tags[0].xpath('string()')
-                sex_year = ganshu(year_string)
-                # Add attribute
-                node.set('sex_year', str(sex_year))
-                # The year 4 is a jiazi year, so is -596
-                era_min = era_df['era_start_year'].min()
-                era_max = era_df['era_end_year'].max()
-                # Get the year of the first instance after minimum
-                gz_origin = -596 + sex_year - 1
-                cycles_elapsed = int((era_min - gz_origin) / 60)
-                last_instance = int(cycles_elapsed * 60 + gz_origin)
-                # Get index years
-                ind_years = [i for i in range(last_instance, int(era_max) + 1, 60)]
-                # Filter era DataFrame
-                temp = pd.DataFrame()
-                for ind_year in ind_years:
-                    bloc = era_df[(era_df['era_start_year'] <= ind_year) & (era_df['era_end_year'] >= ind_year)].copy()
-                    if not bloc.empty:
-                        temp = pd.concat([temp, bloc])
-                era_df = temp.copy()
-                # Filter ruler dataframe
-                ruler_df = ruler_df[ruler_df['person_id'].isin(era_df['ruler_id'].unique())]
-                if ruler_df.empty:
-                    output += f'{phrase_dic.get("rule-sex")}\n'
-                # Test if there is anything Han or earlier
-                test = dyn_df[dyn_df['dyn_id'] <= 43]
-                if era_df.empty and not test.empty:
-                    output += f'{phrase_dic.get("era-sex")}\n'
-            except ValueError:
-                pass
-        if implied.get('sex_year') != sex_year:
-            implied.update({'sex_year': sex_year, 'month': None, 'intercalary': None})
-    else:
-        sex_year = None
-    # Check suffixes
-    for s in node.xpath('.//suffix'):
-        if s.xpath('string()') in ['即位']:
-            year = 1
-            # Find eras
-            era_df = era_df.drop_duplicates(subset=['ruler_id'])
-    # Update implied
-    a = dyn_df.dropna(subset=['dyn_id'])['dyn_id'].unique()
-    if len(a) == 1:
-        implied.update({'dyn_id_ls': [a[0]]})
-    a = ruler_df.dropna(subset=['person_id'])['person_id'].unique()
-    if len(a) == 1:
-        implied.update({'ruler_id_ls': [a[0]]})
-        b = ruler_df.dropna(subset=['person_id'])['dyn_id'].unique()
-        if len(b) == 1:
-            implied.update({'dyn_id_ls': [b[0]]})
-    a = era_df.dropna(subset=['era_id'])['era_id'].unique()
-    if len(a) == 1:
-        implied.update({'era_id_ls': [a[0]]})
-        b = era_df.dropna(subset=['era_id'])['ruler_id'].unique()
-        if len(b) == 1:
-            implied.update({'ruler_id_ls': [b[0]]})
-        b = era_df.dropna(subset=['era_id'])['dyn_id'].unique()
-        if len(b) == 1:
-            implied.update({'dyn_id_ls': [b[0]]})
-    ####################################################################################################################
-    # Narrow calendar stream
-    cal_streams = dyn_df['cal_stream'].to_list() + era_df['cal_stream'].to_list() + ruler_df['cal_stream'].to_list()
-    cal_streams = list(set(cal_streams))
-    lunar_table = lunar_table[lunar_table['cal_stream'].isin(cal_streams)]
-    # Booleans
-    base = len(node.xpath('.//day')) == 0 and len(node.xpath('.//month')) == 0 and len(node.xpath('.//season')) == 0
-    base = base and len(node.xpath('.//season')) == 0 and len(node.xpath('.//int')) == 0 and year is None
-    done = base and len(node.xpath('.//gz')) == 0
-    sub_year = len(node.xpath('.//gz')) > 0 or len(node.xpath('.//day')) > 0 or len(node.xpath('.//month')) > 0
-    sub_year = sub_year or len(node.xpath('.//season')) > 0 or len(node.xpath('.//lp')) > 0
-    stop_at_month = len(node.xpath('.//month')) > 0 and len(node.xpath('.//day')) == 0
-    stop_at_month = stop_at_month and len(node.xpath('.//gz')) == 0 and len(node.xpath('.//lp')) == 0
-    # Ganzhi only
-    gz_only = base and len(node.xpath('.//gz')) == 1
-    #
-    ruler_df = ruler_df[['person_id', 'dyn_id', 'emp_start_year', 'emp_end_year', 'max_year']].copy()
-    ruler_df = ruler_df.rename(columns={'person_id': 'ruler_id'})
-    df = ruler_df.copy()
-    # Only dynasty or emperor given
-    if done and len(era_tags) == 0:
-        # Filter
-        df = preference_filtering(df)
-        # Output implications
-        implied.update({
-            'year': [],
-            'month': [],
-            'intercalary': []
-        })
-        imp_ls = ['dyn_id', 'ruler_id', 'era_id']
-        for i in imp_ls:
-            if i in df.columns:
-                l = df.dropna(subset=[i])[i].unique()
-                if len(l) == 1:
-                    implied.update({f'{i}_ls': list(l)})
-    else:
-        # Now for emperors with no eras
-        no_era_emps = ruler_df[~ruler_df.ruler_id.isin(era_df.ruler_id)].copy()
-        if not no_era_emps.empty:
-            no_era_emps = no_era_emps.rename(columns={'emp_start_year': 'era_start_year', 'emp_end_year': 'era_end_year'})
-            no_era_emps = no_era_emps[['ruler_id', 'dyn_id', 'era_start_year', 'era_end_year', 'max_year']].copy()
-            dyn_temp = dyn_df[['dyn_id', 'cal_stream']].copy()
-            no_era_emps = no_era_emps.merge(dyn_temp, how='left', on='dyn_id')
-        #
-        era_temp = era_df[['cal_stream', 'era_id', 'era_name', 'ruler_id', 'era_start_year', 'era_end_year', 'max_year']].copy()
-        ruler_df = ruler_df[['ruler_id', 'dyn_id']].copy()
-        df = era_temp.merge(ruler_df, how='left', on='ruler_id')
-        if not no_era_emps.empty:
-            df = pd.concat([no_era_emps, df], ignore_index=True)
-        # to-do Here, I am randomly assigning cal_stream 1 to all dynasties w/o
-        df['cal_stream'] = df['cal_stream'].fillna(value=1)
-    if done:
-        # Filter
-        df = preference_filtering(df)
-        # Output implications
-        implied.update({
-            'year': [],
-            'month': [],
-            'intercalary': []
-        })
-        imp_ls = ['dyn_id', 'ruler_id', 'era_id']
-        for i in imp_ls:
-            if i in df.columns:
-                l = df.dropna(subset=[i])[i].unique()
-                if len(l) == 1:
-                    implied.update({f'{i}_ls': list(l)})
-        # output += f"MATCHES: "
-        # Add lables
-        df = add_can_names(df)
-        if df.shape[0] > 1:
-            if 'emp_start_year' in df.columns:
-                temp = df[(df['emp_start_year'] >= tpq) & (df['emp_end_year'] <= taq)].copy()
-                if not temp.empty:
-                    df = temp
-        for index, row in df.iterrows():
-            output += f"{row['dyn_name']}{row['ruler_name']}"
-            if 'era_name' in df.columns:
-                output += f"{row['era_name']}年間（{row['era_start_year']}–{row['era_end_year']}）\n"
-            else:
-                output += f"年間（{row['emp_start_year']}–{row['emp_end_year']}）\n"
-        output = output[:-1]
-        output = output.replace('.0', '')
-    else:
-        # to-do fill out columns
-        for col in ['season', 'day', 'gz', 'lp']:
-            if col not in df.columns:
-                df[col] = np.nan
-        # Establish index year
-        if year is not None:
-            df['year'] = year
-            df['ind_year'] = df['era_start_year'] + year - 1
-        elif year is not None and not sub_year:
-            implied.update({'month': None})
-        elif year is None and sub_year:
-            implied_year = implied.get('year')
-            try:
-                df['year'] = implied_year
-                df['ind_year'] = df['era_start_year'] + implied_year - 1
-            except Exception:
-                ls = []
-                for index, row in df.iterrows():
-                    dic = row.to_dict()
-                    if not pd.isna(row['max_year']):
-                        for y in range(0, int(row['max_year'])):
-                            ldic = {}
-                            ldic.update(dic)
-                            ldic.update({
-                                'year': y,
-                                'ind_year': row['era_start_year'] + y
-                            })
-                            ls.append(ldic)
-                df = pd.DataFrame(ls)
-        else:
-            implied.update({'year': None})
-        if 'ind_year' in df.columns:
-            condition = True
-            # Filter lunar table
-            lunar_table = lunar_table[lunar_table['ind_year'].isin(df.ind_year)]
-            # Set max day
-            lunar_table['max_day'] = lunar_table['hui_jdn'] - lunar_table['nmd_jdn'] + 1
-            # to-do seasons, insert this into lunar table to deal with wierd years
-            # Filter by month
-            if len(node.xpath('.//month[@month]')) > 0:
-                months = [int(float(i.attrib.get('month'))) for i in node.xpath('.//month[@month]')]
-                implied.update({'month': months[0], 'intercalary': None})
-            elif len(node.xpath('.//month')) > 0:
-                months = [i.xpath('string()') for i in node.xpath('.//month')]
-                months = [numcon(i) for i in months]
-                implied.update({'month': months[0], 'intercalary': None})
-                # Add attribute
-                if len(months) == 1:
-                    node.set('month', str(months[0]))
-            elif implied.get('month') is not None:
-                months = [implied.get('month')]
-            else:
-                months = []
-            ls = []
-            for m in months:
-                try:
-                    #if isinstance(m, float):
-                    #    m = int(m)
-                    ls.append(m)
-                except ValueError:
-                    pass
-            months = ls
-            if len(months) == 0:
-                condition = False
-            # Filter by intercalary
-            if len(node.xpath('.//int')) > 0 or implied.get('intercalary') == 1:
-                lunar_table = lunar_table[lunar_table['intercalary'] == 1]
-                implied.update({'intercalary': 1})
-                condition = True
-                # Add attribute
-                node.set('int', '1')
-            # Set condition to continue if we stop at the year or not
-            next_condition = len(node.xpath('.//lp')) > 0 or len(node.xpath('.//gz')) > 0 or len(node.xpath('.//day')) > 0
-            if condition or next_condition:
-                # Merge dynasty, ruler, era, year dataframe with lunar table
-                df = df.merge(lunar_table, how='left', on=['cal_stream', 'ind_year'])
-            else:
-                df['month'] = np.nan
-            if next_condition:
-                # Extract lunar phases, sexagenary dates, and days from XML
-                lp = [i.xpath('string()') for i in node.xpath('.//lp')]
-                gz_strings = [i.xpath('string()') for i in node.xpath('.//gz')]
-                gz = [ganshu(i) for i in gz_strings]
-                days = [i.xpath('string()') for i in node.xpath('.//day')]
-                days = [numcon(i) for i in days]
-                # set attributes
-                if len(lp) == 1:
-                    if '晦' in lp:
-                        node.set('lp', '-1')
-                    elif '朔' in lp:
-                        node.set('lp', '0')
-                if len(gz) == 1:
-                    node.set('gz', str(gz[0]))
-                if len(days) == 1:
-                    node.set('day', str(days[0]))
-                #
-                if len(gz) > 1:
-                    output += f"{phrase_dic.get('mult-sd')}\n"
-                elif len(lp) > 1:
-                    output += f"{phrase_dic.get('mult-lp')}\n"
-                elif len(lp) == 1 and len(gz) == 0:  # If lunar phase and sexagenary date
-                    if '晦' in lp:
-                        df['nmd_jdn'] = df['nmd_jdn'] + df['max_day']
-                        df['nmd_gz'] = (df['nmd_gz'] + df['max_day'] - 2) % 60 + 1
-                        df['day'] = df['max_day']
-                        df['lp'] = -1
-                    else:
-                        df['day'] = 1
-                        df['lp'] = 0
-                    df = df.copy().rename(columns={'nmd_jdn': 'jdn'})
-                    df['gz'] = df['nmd_gz']
-                    del df['nmd_gz']
-                elif len(lp) == 1 and len(gz) == 1:
-                    # hui is the last day of month x, not the eve of month y; update in Norbert
-                    if '晦' in lp:
-                        df['nmd_jdn'] = df['nmd_jdn'] + df['max_day']
-                        df['nmd_gz'] = (df['nmd_gz'] + df['max_day'] - 2) % 60 + 1
-                        df['day'] = df['max_day']
-                        df['lp'] = -1
-                    else:
-                        df['day'] = 1
-                        df['lp'] = 0
-                    df = df[df['nmd_gz'] == gz[0]].copy().rename(columns={'nmd_jdn': 'jdn'})
-                    # Filter by implied ids
-                    df = preference_filtering(df)
-                    test = df[df['month'].isin(months)]
-                    if test.empty:
-                        if '晦' in lp:
-                            next_months = [i + 1 for i in months]
-                            test = df[df['month'].isin(next_months)]
-                            if not test.empty:
-                                implied.update({'month': next_months[0]})
-                                months = next_months
-                            else:
-                                output += f"{phrase_dic.get('nmesd')}\n"
-                        else:
-                            output += f"{phrase_dic.get('sd-lp')}\n"
-                    df['gz'] = gz[0]
-                    del df['nmd_gz']
-                    if df.empty:
-                        output += f"{phrase_dic.get('sd-lp-mo')}\n"
-                elif len(gz) == 1 and len(days) == 1:
-                    df['jdn'] = df['nmd_jdn'] + days[0] - 1
-                    df['jdn2'] = (gz[0] - df['nmd_gz']) % 60 + df['nmd_jdn']
-                    df = df[df['jdn'] == df['jdn2']].copy()
-                    del df['nmd_jdn'], df['jdn2']
-                    df['day'] = days[0]
-                    df['gz'] = gz[0]
-                    if df.empty:
-                        output += f"{phrase_dic.get('nd-sd')}\n"
-                    else:
-                        df = df[df['day'] <= df['max_day']]
-                        if df.empty:
-                            output += f"{phrase_dic.get('ndsd-oob')}\n"
-                elif len(gz) == 1:
-                    try:
-                        df['day'] = (gz[0] - df['nmd_gz']) % 60 + 1
-                        df = df[df['day'] <= df['max_day']]
-                        # Filter by implied ids
-                        df = preference_filtering(df)
-                        if len(months) > 0:
-                            test = df[df['month'].isin(months)]
-                            if test.empty:
-                                if not gz_only:
-                                    output += f"{phrase_dic.get('sd-mo')}\n"
-                                else:
-                                    next_months = [i + 1 for i in months]
-                                    test = df[df['month'].isin(next_months)]
-                                    if not test.empty:
-                                        implied.update({'month': next_months[0]})
-                                        months = next_months
-                                    else:
-                                        output += f"{phrase_dic.get('lsd-mo')}\n"
-                            df = test.copy()
-                        df['jdn'] = df['day'] + df['nmd_jdn'] - 1
-                        del df['nmd_jdn']
-                        df['gz'] = gz[0]
-                    except TypeError:
-                        pass
-                elif len(days) == 1:
-                    df['day'] = days[0]
-                    df['jdn'] = df['day'] + df['nmd_jdn'] - 1
-                    del df['nmd_jdn']
-                    df['gz'] = (df['nmd_gz'] + days[0] - 2) % 60 + 1
-                    df = df[df['day'] <= df['max_day']]
-                    if df.empty:
-                        output += f"{phrase_dic.get('nmob-a')} ({days[0]}) {phrase_dic.get('ob')};\n"
-            elif stop_at_month:
-                # Filter by implied ids
-                df = preference_filtering(df).reset_index(drop=True)
-                temp = df.copy().dropna(subset=['nmd_jdn', 'hui_jdn'])
-                temp['nb_jdn'] = temp['nmd_jdn']
-                temp['na_jdn'] = temp['hui_jdn']
-                temp['ISO_Date_Start'] = temp['nb_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
-                temp['ISO_Date_End'] = temp['na_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
-                df = pd.concat([temp, df]).sort_index()
-                cols = ['ruler_id', 'era_id', 'ind_year', 'month']
-                try:
-                    df = df.drop_duplicates(subset=cols)
-                except KeyError:
-                    pass
-            # Filter by given months
-            if df.shape[0] > 0 and len(months) > 0:
-                bu = df.copy()
-                df = df[df['month'].isin(months)]
-                # print(node.xpath('string()'))
-                # print(df)
-                if df.empty:
-                    df = bu
-                elif len(months) == 1:
-                    implied.update({'month': months[0]})
-            # Filter
-            df = preference_filtering(df)
-            """
-            if node.attrib.get('ind') == '9':
-                # test = df[df['era_id'].isin(implied.get('era_id_ls'))]
-                print(implied)
-                print(months)
-                print(df.to_string(index=False))
-                sys.exit()
-            """
-            # Check for missing things
-            st = ''
-            for i in ['dyn_id', 'ruler_id', 'era_id']:
-                vals = implied.get(f"{i}_ls")
-                if len(vals) == 1:
-                    if df[df[i] == vals[0]].empty:
-                        st += f"{i[:-3].upper()}, "
-            # if st != '' and 'ERROR' not in output:
-            #    output += f"NOTE: implicit {st[:-2]} excluded from results for mismatch; "
-            # If there is a date #######################################################################################
-            if 'jdn' in df.columns:
-                good = df.copy().dropna(subset=['jdn'])
-                bad = df[~df.index.isin(good.index)].copy()
-                good['ISO_Date'] = good['jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
-                df = pd.concat([good, bad]).sort_index()
-            elif 'nmd_jdn' in df.columns:
-                good = df.copy().dropna(subset=['nmd_jdn', 'hui_jdn'])
-                bad = df[~df.index.isin(good.index)].copy()
-                good['ISO_Date_Start'] = good['nmd_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
-                good['ISO_Date_End'] = good['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
-                df = pd.concat([good, bad]).sort_index()
-            # Output implications
-            imp_ls = ['dyn_id', 'ruler_id', 'era_id']
-            for i in imp_ls:
-                if i in df.columns:
-                    l = df.dropna(subset=[i])[i].unique()
-                    if len(l) == 1:
-                        implied.update({f'{i}_ls': list(l)})
-            temp = df.dropna(subset=['year'])['year'].unique()
-            if len(temp) == 1:
-                implied.update({'year': temp[0]})
-            # Drop duplicates
-            cols = ['jdn', 'nb_jdn', 'na_jdn']
-            cols = [i for i in cols if i in df.columns]
-            if len(cols) > 0:
-                df = df.drop_duplicates(subset=cols)
-            # Apply date range filter to narrow results if necessary
-            if df.shape[0] > 1:
-                temp = df[(df['ind_year'] >= tpq) & (df['ind_year'] <= taq)].copy()
-                if not temp.empty:
-                    df = temp
-            # Limit on hits
-            if df.shape[0] > 15:
-                output += f'{phrase_dic.get("er")}: {df.shape[0]} {phrase_dic.get("matches").lower()}'
-                if not correct:
-                    df = pd.DataFrame([node.attrib]).rename(columns={'index': 'date_index'})
-                else:
-                    del df
-                    df = pd.DataFrame()
-            if df.empty and not correct:
-                if not era_df.empty:
-                    df = era_df.copy()
-                    for key, value in node.attrib.items():
-                        df[key] = value
-                else:
-                    df = pd.DataFrame([node.attrib]).rename(columns={'index': 'date_index'})
-                df['mismatch'] = True              
-            else:
-                try:
-                    # Add labels
-                    df = add_can_names(df)
-                    # Text output
-                    temp_string = ""  # f"MATCHES: "
-                    df = df.sort_values(by=['cal_stream', 'ind_year'])
-                    for index, row in df.iterrows():
-                        temp_string += f"{row['dyn_name']}{row['ruler_name']}"
-                        if isinstance(row['era_name'], str):
-                            temp_string += row['era_name']
-                        if not pd.isna(row['year']):
-                            implied.update({'year': row['year']})
-                            if row['year'] == 1:
-                                temp_string += '元年'
-                            else:
-                                temp_string += numcon(row['year']) + '年'
-                        if not next_condition and len(months) == 0:  # If year only
-                            temp_string += f"（{row['ind_year']}）"
-                        if 'intercalary' in df.columns:
-                            if row['intercalary'] == 1:
-                                temp_string += '閏'
-                        if not pd.isna(row['month']):
-                            implied.update({'month': row['month']})
-                            if row['month'] == 1:
-                                temp_string += '正月'
-                            else:
-                                temp_string += numcon(row['month']) + '月'
-                        if stop_at_month:
-                            start_gz = ganshu(row['nmd_gz'])
-                            end_gz = ganshu((row['nmd_gz'] + row['max_day'] - 2) % 60 + 1)
-                            if jd_out:
-                                temp_string += f'（JD {start_gz}{row["nmd_jdn"]} ~ {end_gz}{row["hui_jdn"]}''）'
-                            else:
-                                temp_string += f'（{start_gz}{row["ISO_Date_Start"]} ~ {end_gz}{row["ISO_Date_End"]}）'
-                        if not pd.isna(row['day']) and row['lp'] != 0:
-                            temp_string += numcon(row['day']) + '日'
-                        if not pd.isna(row['gz']):
-                            temp_string += ganshu(row['gz'])
-                        if not pd.isna(row['lp']):
-                            dic = {0: '朔', -1: '晦'}
-                            temp_string += dic.get(row['lp'])
-                        if 'jdn' in df.columns:
-                            if jd_out:
-                                temp_string += f'（JD {row["jdn"]}）'
-                            else:
-                                temp_string += f'（{row["ISO_Date"]}）'
-                        temp_string += '\n'
-                    if temp_string == "":
-                        output += "No matches"
-                    else:
-                        output += temp_string[:-1]
-                except KeyError:
-                    pass
-                # Update implications
-                """
-                implied.update({
-                    'year': None,
-                    'month': None,
-                    'intercalary': None
-                })
-                """
-                for i in ['year', 'month', 'intercalary']:
-                    if i in df.columns:
-                        temp = df.dropna(subset=[i])[i].unique()
-                        if len(temp) == 1:
-                            implied.update({i: temp[0]})
-                imp_ls = ['dyn_id', 'ruler_id', 'era_id']
-                for i in imp_ls:
-                    if i in df.columns:
-                        l = df.dropna(subset=[i])[i].unique()
-                        if len(l) == 1:
-                            implied.update({f'{i}_ls': list(l)})
-    output = output.replace('.0', '')
-    df = preference_filtering(df)
-    return df, output, implied
-
-
 def index_date_nodes(xml_string) -> str:
     """
     Index date nodes in XML string.
@@ -2119,7 +1454,7 @@ def index_date_nodes(xml_string) -> str:
     return xml_string
 
 
-def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=-3000, taq=3000, jd_out=False, civ=None, tables=None):
+def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None):
     """
     Extract date table from XML string using optimized bulk processing.
     
@@ -2131,30 +1466,30 @@ def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=-3000, taq=
     :param lang: str, language ('en' or 'fr')
     :param tpq: int, terminus post quem
     :param taq: int, terminus ante quem
-    :param jd_out: bool, output JDN in report
     :param civ: str or list, civilization filter
     :param tables: Optional pre-loaded tables tuple. If None, will load via prepare_tables().
     :return: tuple (xml_string, report, output_df)
     """
     # Defaults
     if gs is None:
-        gs = [1582, 10, 15]
+        gs = DEFAULT_GREGORIAN_START
     if civ is None:
         civ = ['c', 'j', 'k']
-
-    if lang == 'en':
-        phrase_dic = phrase_dic_en
-    else:
-        phrase_dic = phrase_dic_fr
     
     # Use the optimized bulk function (delegates to extract_date_table_bulk)
     return extract_date_table_bulk(
         xml_string, pg=pg, gs=gs, lang=lang,
-        tpq=tpq, taq=taq, jd_out=jd_out, civ=civ, tables=tables, sequential=True
+        tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=True
     )
 
 
 def dates_xml_to_df(xml_string: str) -> pd.DataFrame:
+    """
+    Convert XML string with date elements to pandas DataFrame.
+
+    :param xml_string: str, XML string containing date elements
+    :return: pd.DataFrame, DataFrame with extracted date information
+    """
     xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
 
     # Handle namespaces - check if root has a default namespace
@@ -2174,7 +1509,7 @@ def dates_xml_to_df(xml_string: str) -> pd.DataFrame:
 
         row = {
             "date_index": node.attrib.get("index"),
-            "date_string": node.xpath("normalize-space(string())", namespaces=ns)[0] if node.xpath("normalize-space(string())", namespaces=ns) else "",
+            "date_string": node.xpath("normalize-space(string())", namespaces=ns) if node.xpath("normalize-space(string())", namespaces=ns) else "",
 
             "dyn_str": get1(".//tei:dyn" if ns else ".//dyn"),
             "ruler_str": get1(".//tei:ruler" if ns else ".//ruler"),
@@ -2193,6 +1528,12 @@ def dates_xml_to_df(xml_string: str) -> pd.DataFrame:
 
 
 def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize and convert string date fields to numeric values in DataFrame.
+
+    :param df: pd.DataFrame, DataFrame with string date fields
+    :return: pd.DataFrame, DataFrame with normalized numeric date fields
+    """
     out = df.copy()
     # year
     out["year"] = out["year_str"].where(out["year_str"].notna(), None)
@@ -2223,7 +1564,8 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
     out["lp"] = out["lp_str"].map(lambda s: lp_dic.get(s) if isinstance(s, str) else None)
 
     # intercalary
-    out["intercalary"] = out["has_int"].replace({0: None, 1: 1})
+    # out["intercalary"] = out["has_int"].replace({0: None, 1: 1})
+    out["intercalary"] = out["has_int"].replace({0: None, 1: 1}).infer_objects(copy=False)
     
     # Normalize date_string: remove all spaces from Chinese text
     if "date_string" in out.columns:
@@ -2466,7 +1808,7 @@ def bulk_resolve_era_ids(df, era_df):
     return out
 
 
-def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_table, lunar_table, tpq=-3000, taq=3000, civ=None, proliferate=False):
+def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_table, lunar_table, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, proliferate=False):
     """
     Generate all possible dynasty/ruler/era combinations for each date.
     
@@ -2486,6 +1828,11 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     :param ruler_df: Full ruler DataFrame with ['person_id', 'dyn_id', 'emp_start_year', 'emp_end_year', 'max_year']
     :param era_df: Full era DataFrame with ['era_id', 'ruler_id', 'dyn_id', 'cal_stream', 
                                           'era_start_year', 'era_end_year', 'max_year', 'era_name']
+    :param master_table: Full master DataFrame
+    :param lunar_table: Lunation DataFrame
+    :param tpq: int, terminus post quem
+    :param taq: int, terminus ante quem
+    :param civ: str or list, civilization filter
     :return: Expanded DataFrame with all candidate combinations, with columns:
              date_index, dyn_id, ruler_id, era_id, cal_stream, era_start_year, era_end_year, max_year, etc.
     """
@@ -2914,6 +2261,7 @@ def preference_filtering_bulk(table, implied):
     
     # Filter by implied intercalary
     inter = implied.get('intercalary')
+    bu = table.copy()
     if 'intercalary' in table.columns and inter is not None:
         if table.shape[0] > 1:
             intercalarys = table.dropna(subset=['intercalary'])['intercalary'].unique()
@@ -2956,7 +2304,7 @@ def add_can_names_bulk(table, ruler_can_names, dyn_df):
     return out
 
 
-def solve_date_simple(g, implied, phrase_dic, ruler_can_names, dyn_df, tpq=-3000, taq=3000):
+def solve_date_simple(g, implied, phrase_dic, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ):
     """
     Solve dates that have only dynasty/ruler/era (no year/month/day constraints).
 
@@ -2966,8 +2314,6 @@ def solve_date_simple(g, implied, phrase_dic, ruler_can_names, dyn_df, tpq=-3000
     :param g: DataFrame with candidate rows for a single date_index
     :param implied: dict with implied state from previous dates
     :param phrase_dic: dict with phrase translations
-    :param ruler_can_names: DataFrame with ruler canonical names
-    :param dyn_df: DataFrame with dynasty information
     :param tpq: terminus post quem (earliest date)
     :param taq: terminus ante quem (latest date)
     :return: tuple (result_df, report_string, updated_implied)
@@ -3009,20 +2355,17 @@ def solve_date_simple(g, implied, phrase_dic, ruler_can_names, dyn_df, tpq=-3000
     return df, updated_implied
 
 
-def solve_date_with_year(g, implied, phrase_dic, ruler_can_names, dyn_df, era_df, tpq=-3000, taq=3000, has_month=False, has_day=False, has_gz=False, has_lp=False):
+def solve_date_with_year(g, implied, era_df, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, has_month=False, has_day=False, has_gz=False, has_lp=False):
     """
     Solve dates that have year constraints (numeric or sexagenary).
-    
+
     Handles:
     - Numeric year constraints (filter by max_year, calculate ind_year)
     - Sexagenary year constraints (expand to multiple index years, every 60 years)
     - Year-only dates (no month/day constraints)
-    
+
     :param g: DataFrame with candidate rows for a single date_index
     :param implied: dict with implied state from previous dates
-    :param phrase_dic: dict with phrase translations
-    :param ruler_can_names: DataFrame with ruler canonical names
-    :param dyn_df: DataFrame with dynasty information
     :param era_df: DataFrame with era information
     :param tpq: terminus post quem (earliest date)
     :param taq: terminus ante quem (latest date)
@@ -3194,23 +2537,20 @@ def solve_date_with_year(g, implied, phrase_dic, ruler_can_names, dyn_df, era_df
     return df, updated_implied
 
 
-def solve_date_with_lunar_constraints(g, implied, phrase_dic, ruler_can_names, dyn_df, lunar_table, 
+def solve_date_with_lunar_constraints(g, implied, lunar_table,
                                       month=None, day=None, gz=None, lp=None, intercalary=None,
-                                      tpq=-3000, taq=3000, pg=False, gs=None, jd_out=False):
+                                      tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, pg=False, gs=None):
     """
     Solve dates with month/day/sexagenary day/lunar phase constraints.
-    
+
     This is the most complex constraint solving, involving:
     - Lunar table joins (month/day calculations)
     - Sexagenary day (gz) matching
     - Lunar phase (lp) handling (朔/new moon, 晦/last day)
     - Various combinations of constraints
-    
+
     :param g: DataFrame with candidate rows (should already have ind_year calculated)
     :param implied: dict with implied state
-    :param phrase_dic: dict with phrase translations
-    :param ruler_can_names: DataFrame with ruler canonical names
-    :param dyn_df: DataFrame with dynasty information
     :param lunar_table: DataFrame with lunar calendar data (must have ind_year, cal_stream, etc.)
     :param month: int or list of ints, month constraint(s)
     :param day: int, day constraint
@@ -3221,7 +2561,6 @@ def solve_date_with_lunar_constraints(g, implied, phrase_dic, ruler_can_names, d
     :param taq: terminus ante quem
     :param pg: proleptic gregorian flag
     :param gs: gregorian start date
-    :param jd_out: bool, whether to output JDN in report
     :return: tuple (result_df, report_string, updated_implied)
     """
     if g.empty or 'ind_year' not in g.columns:
@@ -3305,13 +2644,16 @@ def solve_date_with_lunar_constraints(g, implied, phrase_dic, ruler_can_names, d
                     # Return original candidates if month matching fails completely
                     df = g.copy()
                     df['error_str'] += "year-month mismatch; "
-    else:
-        print(df.to_string())
-        # TODO this will require debugging with specific examples
-        # For intercalary months or when no month constraint, just update the columns
-        df['month'] = df['lunar_month']
-        df['intercalary'] = df['lunar_intercalary']
-        raise Exception("Debug me")
+    else:  # If no month constraint but intercalary
+        # Fetch month from lunar table
+        # Note: this should be fine, because we have matched on cal_stream and ind_year,
+        #       so the only worry is that said year doesn't have an intercalary month.
+        if not df.dropna(subset=['lunar_intercalary']).empty:
+            df['month'] = df['lunar_month']
+        else:
+            if 'error_str' not in df.columns:
+                df['error_str'] = ""
+            df['error_str'] += "Year-int. month mismatch; "
     # Handle stop_at_month case (month only, no day/gz/lp)
     if stop_at_month:
         df = preference_filtering_bulk(df, updated_implied)
@@ -3493,7 +2835,7 @@ def solve_date_with_lunar_constraints(g, implied, phrase_dic, ruler_can_names, d
     return df, updated_implied
 
 
-def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000, taq=3000, jd_out=False, civ=None, tables=None, sequential=True, proliferate=False):
+def extract_date_table_bulk(xml_string, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, sequential=True, proliferate=False):
     """
     Optimized bulk version of extract_date_table using pandas operations.
     
@@ -3508,17 +2850,29 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     :param lang: str, language ('en' or 'fr')
     :param tpq: int, terminus post quem
     :param taq: int, terminus ante quem
-    :param jd_out: bool, output JDN in report
     :param civ: str or list, civilization filter
     :param tables: Optional pre-loaded tables tuple. If None, will load via prepare_tables().
                    Should be tuple: (era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names)
+    :param sequential: bool, intelligently forward fills missing date elements from previous Sinitic date string
+    :param proliferate: bool, finds all candidates for date strings without dynasty, ruler, or era
     :return: tuple (xml_string, report, output_df) - same format as extract_date_table()
     """
     # Defaults
     if gs is None:
-        gs = [1582, 10, 15]
+        gs = DEFAULT_GREGORIAN_START
     if civ is None:
         civ = ['c', 'j', 'k']
+    
+    if implied is None:
+        implied = {
+            'dyn_id_ls': [],
+            'ruler_id_ls': [],
+            'era_id_ls': [],
+            'year': None,
+            'month': None,
+            'intercalary': None,
+            'sex_year': None
+        }
     
     if lang == 'en':
         phrase_dic = phrase_dic_en
@@ -3532,7 +2886,6 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     xml_string = index_date_nodes(xml_string)
     df = dates_xml_to_df(xml_string)
     if df.empty:
-        print("DEBUG: extract_date_table_bulk - no dates found in XML")
         return xml_string, pd.DataFrame()
 
     # Step 2: Normalize date fields (convert strings to numbers)
@@ -3555,33 +2908,12 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     
     # Add report note
     df_candidates['error_str'] = ""
-
-    # Step 6: Process each date sequentially (preserving implied state)
-    implied = {
-        'dyn_id_ls': [],
-        'ruler_id_ls': [],
-        'era_id_ls': [],
-        'year': None,
-        'month': None,
-        'intercalary': None,
-        'sex_year': None
-    }
     
     all_results = []
     
     # Group by date_index and process sequentially
     for date_idx in sorted(df_candidates['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0):
         # Reset implied state for each date if not sequential
-        if not sequential:
-            implied = {
-                'dyn_id_ls': [],
-                'ruler_id_ls': [],
-                'era_id_ls': [],
-                'year': None,
-                'month': None,
-                'intercalary': None,
-                'sex_year': None
-            }
 
         g = df_candidates[df_candidates['date_index'] == date_idx].copy()
         if g.empty:
@@ -3602,14 +2934,14 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
         if is_simple:
             # Simple date (dynasty/era only)
             result_df, implied = solve_date_simple(
-                g, implied, phrase_dic, ruler_can_names, dyn_df, tpq, taq
+                g, implied, phrase_dic, tpq, taq
             )
         elif has_month or has_day or has_gz or has_lp:
             # Date with lunar constraints
             # First handle year if present
             if has_year or has_sex_year:
                 g, implied = solve_date_with_year(
-                    g, implied, phrase_dic, ruler_can_names, dyn_df, era_df, tpq, taq,
+                    g, implied, era_df, tpq, taq,
                     has_month, has_day, has_gz, has_lp
                 )
             # Then handle lunar constraints
@@ -3624,9 +2956,9 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
                 lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
                 intercalary_val = 1 if has_intercalary else None
                 result_df, implied = solve_date_with_lunar_constraints(
-                    g, implied, phrase_dic, ruler_can_names, dyn_df, lunar_table,
+                    g, implied, lunar_table,
                     month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
-                    tpq=tpq, taq=taq, pg=pg, gs=gs, jd_out=jd_out
+                    tpq=tpq, taq=taq, pg=pg, gs=gs
                 )
                 # If lunar constraints resulted in no matches (likely due to corruption),
                 # return the original input dataframe instead of empty
@@ -3643,7 +2975,7 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
         else:
             # Year-only date (no month/day constraints)
             result_df, implied = solve_date_with_year(
-                g, implied, phrase_dic, ruler_can_names, dyn_df, era_df, tpq, taq,
+                g, implied, era_df, tpq, taq,
                 False, False, False, False
             )
             # If year-only date solving resulted in no matches, return original candidates
@@ -3659,14 +2991,20 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     
     # Combine all results
     if all_results:
-        output_df = pd.concat(all_results, ignore_index=True)
+        # output_df = pd.concat(all_results, ignore_index=True)
+        # Filter out empty DataFrames to avoid the warning
+        non_empty_results = [df for df in all_results if not df.empty]
+        if non_empty_results:
+            output_df = pd.concat(non_empty_results, ignore_index=True)
+        else:
+            output_df = pd.DataFrame()
     else:
         output_df = pd.DataFrame()
 
     # Return XML string (unchanged) and output dataframe
     xml_string = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
 
-    return xml_string, output_df
+    return xml_string, output_df, implied
 
 
 def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
@@ -3757,7 +3095,7 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
                 "–" + df.loc[era_only_mask & df["era_start_year"].notna() & df["era_end_year"].notna(), "era_end_year"].astype(int).astype(str) + "）"
             )
         # else: no era processing needed
-    except Exception as e:
+    except Exception:
         # If anything goes wrong with era processing, skip it
         pass
 
@@ -3840,17 +3178,30 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
     return "\n\n".join(report_blocks)
 
 
-def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-3000, taq=3000, civ=None, sequential=True, proliferate=False):
-    # Start overall timing
-    start_time = time.time()
-    timing_info = {}
+def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True, proliferate=True):
+    """
+    Main Chinese calendar date interpreter that processes various input formats.
 
+    :param ui: str, input date string (Chinese calendar, ISO format, or Julian Day Number)
+    :param lang: str, language for output ('en' or 'fr')
+    :param jd_out: bool, whether to include Julian Day Numbers in output
+    :param pg: bool, use proleptic Gregorian calendar
+    :param gs: list, Gregorian start date [year, month, day]
+    :param tpq: int, earliest date (terminus post quem)
+    :param taq: int, latest date (terminus ante quem)
+    :param civ: str or list, civilization filter
+    :param sequential: bool, process dates sequentially
+    :param proliferate: bool, allow date proliferation
+    :return: str, formatted interpretation report
+    """
     # Defaults
     if gs is None:
-        gs = [1582, 10, 15]
+        gs = DEFAULT_GREGORIAN_START
     if civ is None:
         civ = ['c', 'j', 'k']
-
+    if not sequential:
+        proliferate = True
+    
     if lang == 'en':
         phrase_dic = phrase_dic_en
     else:
@@ -3860,6 +3211,8 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
     ui = re.sub(r'[,;]', r'\n', ui)
     items = re.split(r'\n', ui)
     output_string = ''
+    implied = None
+    
     for item in items:
         if item != '':
             # Determine input type 
@@ -3896,15 +3249,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
             elif is_ccs:
                 # Reset implied state for each date in non-sequential mode
                 if not sequential:
-                    implied = {
-                        'dyn_id_ls': [],
-                        'ruler_id_ls': [],
-                        'era_id_ls': [],
-                        'year': None,
-                        'month': None,
-                        'intercalary': None,
-                        'sex_year': None
-                    }
+                    implied = None
 
                 # Convert string to XML, tag all date elements
                 xml_string = tag_date_elements(item, civ=civ)
@@ -3922,9 +3267,9 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
                 tables = prepare_tables(civ=civ)
                 
                 # Extract dates using optimized bulk function
-                xml_string, output_df = extract_date_table_bulk(
-                    xml_string, pg=pg, gs=gs, lang=lang,
-                    tpq=tpq, taq=taq, jd_out=jd_out, civ=civ, tables=tables, sequential=False, proliferate=proliferate
+                xml_string, output_df, implied = extract_date_table_bulk(
+                    xml_string, implied=implied, pg=pg, gs=gs, lang=lang,
+                    tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=False, proliferate=proliferate
                 )
 
                 # Extract tables for canonical name addition

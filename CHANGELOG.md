@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.7] - 2025-01-08
+
+### Changed
+- Rewrote codebase to increase speed
+- Solved problem of duplicate entries in reports
+- Tested functions for independant use in XML tagging
+- Added sequential vs non sequential modes to determine whether to intelligently forward fill date elements
+- Added proliferate mode to disable enormous match sets on ambiguous strings in XML tagging
+
+### Documentation
+- Added comprehensive docstrings to all functions that were missing them
 
 ## [0.1.6] - 2025-12-30
 
@@ -31,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/PotatoSinology/sanmiao/releases/tag/v0.1.4
