@@ -11,11 +11,12 @@ from math import floor
 from functools import lru_cache
 import sys
 
+# TODO fully re-implement sexagenary year calculation
 # TODO testing in date extraction before anything else.
 # TODO clean up table output
 # TODO clean up code and comments
-# TODO add sequential mode to web app
 # TODO test intercalary month thing
+# TODO add sequential mode to web app
 
 phrase_dic_en = {
     'ui': 'USER INPUT', 'matches': 'MATCHES', 'nonsense': 'ERROR: You did a nonsense',
@@ -111,10 +112,15 @@ def load_csv(csv_name: str) -> pd.DataFrame:
     return _load_csv_cached(csv_name).copy()
 
 
-def prepare_tables(civ):
+def prepare_tables(civ=None):
+    # Default civilisations
+    if civ is None:
+        civ = ['c', 'j', 'k']
+    
     era_df, dyn_df, ruler_df, lunar_table = load_num_tables(civ=civ)
     dyn_tag_df, ruler_tag_df = load_tag_tables(civ=civ)
     ruler_can_names = load_csv('rul_can_name.csv')[['person_id', 'string']].copy()
+    
     return era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names
 
 
@@ -2097,8 +2103,16 @@ def index_date_nodes(xml_string) -> str:
     Index date nodes in XML string.
     """
     xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
+
+    # Handle namespaces
+    ns = {}
+    if xml_root.tag.startswith('{'):
+        ns_uri = xml_root.tag.split('}')[0][1:]
+        ns = {'tei': ns_uri}
+
     index = 0
-    for node in xml_root.xpath('.//date'):
+    date_xpath = './/tei:date' if ns else './/date'
+    for node in xml_root.xpath(date_xpath, namespaces=ns):
         node.set('index', str(index))
         index += 1
     xml_string = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
@@ -2142,24 +2156,37 @@ def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=-3000, taq=
 
 def dates_xml_to_df(xml_string: str) -> pd.DataFrame:
     xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
+
+    # Handle namespaces - check if root has a default namespace
+    ns = {}
+    if xml_root.tag.startswith('{'):
+        # Extract namespace from root tag
+        ns_uri = xml_root.tag.split('}')[0][1:]
+        ns = {'tei': ns_uri}
+
     rows = []
-    for node in xml_root.xpath('.//date'):
-        get1 = lambda xp: (node.xpath(f'normalize-space(string({xp}[1]))') or None)
+    # Use namespace-aware XPath
+    date_xpath = './/tei:date' if ns else './/date'
+    for node in xml_root.xpath(date_xpath, namespaces=ns):
+        def get1(xp):
+            result = node.xpath(f'normalize-space(string({xp}))', namespaces=ns)
+            return result if result and result.strip() else None
+
         row = {
             "date_index": node.attrib.get("index"),
-            "date_string": node.xpath("normalize-space(string())"),
+            "date_string": node.xpath("normalize-space(string())", namespaces=ns)[0] if node.xpath("normalize-space(string())", namespaces=ns) else "",
 
-            "dyn_str": get1(".//dyn"),
-            "ruler_str": get1(".//ruler"),
-            "era_str": get1(".//era"),
+            "dyn_str": get1(".//tei:dyn" if ns else ".//dyn"),
+            "ruler_str": get1(".//tei:ruler" if ns else ".//ruler"),
+            "era_str": get1(".//tei:era" if ns else ".//era"),
 
-            "year_str": get1(".//year"),
-            "sexYear_str": get1(".//sexYear"),
-            "month_str": get1(".//month"),
-            "day_str": get1(".//day"),
-            "gz_str": get1(".//gz"),
-            "lp_str": get1(".//lp"),
-            "has_int": 1 if node.xpath(".//int") else 0,
+            "year_str": get1(".//tei:year" if ns else ".//year"),
+            "sexYear_str": get1(".//tei:sexYear" if ns else ".//sexYear"),
+            "month_str": get1(".//tei:month" if ns else ".//month"),
+            "day_str": get1(".//tei:day" if ns else ".//day"),
+            "gz_str": get1(".//tei:gz" if ns else ".//gz"),
+            "lp_str": get1(".//tei:lp" if ns else ".//lp"),
+            "has_int": 1 if node.xpath(".//tei:int" if ns else ".//int", namespaces=ns) else 0,
         }
         rows.append(row)
     return pd.DataFrame(rows)
@@ -2175,7 +2202,7 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
 
     # sexYear
     out["sex_year"] = out["sexYear_str"].map(lambda s: ganshu(s) if isinstance(s, str) and s else None)
-
+    
     # month
     def month_to_int(s):
         if not isinstance(s, str) or not s:
@@ -2469,7 +2496,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     
     # We'll build candidate rows per date_index
     all_candidates = []
-    
+
     for date_idx in out['date_index'].dropna().unique():
         # Get ALL rows for this date_index (not just first one)
         # This is important because bulk_resolve_era_ids can expand one date_index
@@ -2483,7 +2510,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             dyn_id = row.get('dyn_id') if pd.notna(row.get('dyn_id')) else None
             ruler_id = row.get('ruler_id') if pd.notna(row.get('ruler_id')) else None
             era_id = row.get('era_id') if pd.notna(row.get('era_id')) else None
-            
+
             # Store the combination and source row for later use
             resolved_combinations.append({
                 'dyn_id': dyn_id,
@@ -2516,6 +2543,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                         candidate_row[col] = first_row.get(col)
                 all_candidates.append(candidate_row)
             else:
+                t_out = date_rows.copy()
                 # Copy lunar table
                 t_lt = lunar_table.copy()
 
@@ -2529,12 +2557,12 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 
                 # Clean columns
                 cols = ['year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str']
-                cols = [i for i in cols if i in date_rows.columns]
-                date_rows = date_rows.drop(columns=cols)
+                cols = [i for i in cols if i in t_out.columns]
+                t_out = t_out.drop(columns=cols)
                 
                 # Merge on month and/or intercalary
-                a = date_rows.copy().dropna(subset=['intercalary', 'month'], how='any')
-                b = date_rows[~date_rows.index.isin(a.index)].copy().dropna(subset=['month'], how='any')
+                a = t_out.copy().dropna(subset=['intercalary', 'month'], how='any')
+                b = t_out[~t_out.index.isin(a.index)].copy().dropna(subset=['month'], how='any')
                 c = b.copy().dropna(subset=['intercalary'], how='any')
                 b = b[~b.index.isin(c.index)].copy().dropna(subset=['month'], how='any')
                 del c['month'], b['intercalary']
@@ -2542,54 +2570,70 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 d = a.merge(t_lt, on=['month', 'intercalary'], how='left')
                 e = b.merge(t_lt, on=['month'], how='left')
                 f = c.merge(t_lt, on=['intercalary'], how='left')
-                date_rows = pd.concat([d, e, f])
+                t_out = pd.concat([d, e, f])
                 
-                if not date_rows.dropna(subset=['lp']).empty:  # If there is a lunar phase constraint
+                if not t_out.dropna(subset=['lp']).empty:  # If there is a lunar phase constraint
                     # If there is a sexagenary day constraint
-                    if not date_rows.dropna(subset=['gz']).empty:
-                        if date_rows['lp'].iloc[0] == -1:  # 晦
-                            date_rows = date_rows[date_rows['gz'] == date_rows['hui_gz']]
+                    if not t_out.dropna(subset=['gz']).empty:
+                        if t_out['lp'].iloc[0] == -1:  # 晦
+                            t_out = t_out[t_out['gz'] == t_out['hui_gz']]
                         else:  # 朔
-                            date_rows = date_rows[date_rows['gz'] == date_rows['nmd_gz']]
+                            t_out = t_out[t_out['gz'] == t_out['nmd_gz']]
                     # Add day column
-                    if date_rows['lp'].iloc[0] == -1:  # 晦
-                        date_rows['day'] = date_rows['max_day']
+                    if t_out['lp'].iloc[0] == -1:  # 晦
+                        t_out['day'] = t_out['max_day']
                     else:  # 朔
-                        date_rows['day'] = 1
+                        t_out['day'] = 1
                 else:  # If there is no lunar phase constraint
-                    if not date_rows.dropna(subset=['gz']).empty:  # If there is a sexagenary day constraint
-                        date_rows['_day'] = ((date_rows['gz'] - date_rows['nmd_gz']) % 60) + 1
-                        if date_rows.dropna(subset=['day']).empty:  # If there is no numeric day constraint
-                            date_rows['day'] = date_rows['_day']
+                    if not t_out.dropna(subset=['gz']).empty:  # If there is a sexagenary day constraint
+                        t_out['_day'] = ((t_out['gz'] - t_out['nmd_gz']) % 60) + 1
+                        if t_out.dropna(subset=['day']).empty:  # If there is no numeric day constraint
+                            t_out['day'] = t_out['_day']
                         else:  # If there is a numeric day constraint
                             # Filter 
-                            date_rows = date_rows[date_rows['day'] == date_rows['_day']]
-                    if not date_rows.dropna(subset=['day']).empty:  # If there is a numeric day constraint
-                        date_rows = date_rows[date_rows['day'] <= date_rows['max_day']]
-                
+                            t_out = t_out[t_out['day'] == t_out['_day']]
+                    if not t_out.dropna(subset=['day']).empty:  # If there is a numeric day constraint
+                        t_out = t_out[t_out['day'] <= t_out['max_day']]
+
                 # Clean columns
                 cols = ['max_day', 'hui_gz']
-                date_rows = date_rows.drop(columns=cols)
+                t_out = t_out.drop(columns=cols)
                 
                 # Merge with master table
-                date_rows = date_rows.merge(master_table, on=['cal_stream'], how='left')
+                t_out = t_out.merge(master_table, on=['cal_stream'], how='left')
                 
                 # Filter by lunar table ind_year
-                date_rows = date_rows[
-                    (date_rows['nmd_jdn'] >= date_rows['era_start_jdn']) &
-                    (date_rows['hui_jdn'] <= date_rows['era_end_jdn'])
+                t_out = t_out[
+                    (t_out['nmd_jdn'] >= t_out['era_start_jdn']) &
+                    (t_out['hui_jdn'] <= t_out['era_end_jdn'])
                 ]
                 
                 # Filter by year
-                if not date_rows.dropna(subset=['year']).empty:
-                    date_rows['_ind_year'] = date_rows['year'] + date_rows['era_start_year'] - 1
-                    date_rows = date_rows[date_rows['_ind_year'] == date_rows['ind_year']]
+                if not t_out.dropna(subset=['year']).empty:
+                    t_out['_ind_year'] = t_out['year'] + t_out['era_start_year'] - 1
+                    t_out = t_out[t_out['_ind_year'] == t_out['ind_year']]
+                    if t_out.empty:
+                        date_rows['date_index'] = date_idx
+                        date_rows['error_str'] = 'Year-lunation mismatch'
+                        all_candidates.extend(date_rows.to_dict('records'))
+                        continue
                 else:
-                    date_rows['year'] = date_rows['ind_year'] - date_rows['era_start_year'] + 1
+                    t_out['year'] = t_out['ind_year'] - t_out['era_start_year'] + 1
+                
+                # Filter by sexagenary year
+                if not t_out.dropna(subset=['sex_year']).empty:
+                    t_out = t_out[t_out['sex_year'] == t_out['year_gz']]
+                    if t_out.empty:
+                        date_rows['date_index'] = date_idx
+                        date_rows['error_str'] = 'Year-sex. year mismatch'
+                        all_candidates.extend(date_rows.to_dict('records'))
+                        continue
+                
+                date_rows = t_out
                 
                 # Clean columns
                 cols = ['_ind_year', 'nmd_gz', 'nmd_jdn', 'hui_jdn', 'ind_year']
-                cols = [i for i in cols if i in date_rows.columns]
+                cols = [i for i in cols if i in t_out.columns]
                 date_rows = date_rows.drop(columns=cols)
                 
                 date_rows['date_index'] = date_idx
@@ -2597,6 +2641,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 all_candidates.extend(date_rows.to_dict('records'))
                 
                 """
+                # DPM: I think that this was slower
                 base = date_rows.copy()
                 base['_tmp'] = 1
                 master_table['_tmp'] = 1
@@ -2611,6 +2656,8 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 # Build ind_year
                 if date_rows['year'].dropna().empty:
                     date_rows = date_rows.dropna(subset=['era_start_year', 'era_end_year'])
+                    # Ensure no NaN values remain before conversion
+                    date_rows = date_rows[date_rows['era_start_year'].notna() & date_rows['era_end_year'].notna()]
                     date_rows['era_start_year'] = date_rows['era_start_year'].astype(int)
                     date_rows['era_end_year'] = date_rows['era_end_year'].astype(int)
 
@@ -2640,7 +2687,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
         # Filter these combinations against the loaded tables to find valid ones
         valid_candidates = []
         seen_combinations = set()
-        
+
         for combo in resolved_combinations:
             # Skip combinations with no IDs
             if (combo['dyn_id'] is None and
@@ -2784,7 +2831,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             valid_candidates.append(candidate_row)
         
         all_candidates.extend(valid_candidates)
-    
+
     # Convert to DataFrame
     if all_candidates:
         candidates_df = pd.DataFrame(all_candidates)
@@ -2802,8 +2849,8 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     #     candidates_df['cal_stream'] = candidates_df['cal_stream'].fillna(1.0)
     # else:
     #     candidates_df['cal_stream'] = 1.0
-    
-    cols = ['dyn_str', 'ruler_str', 'era_str', 'year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str']
+
+    cols = ['dyn_str', 'ruler_str', 'era_str', 'year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str', 'year_gz']
     cols = [i for i in cols if i in candidates_df.columns]
     candidates_df = candidates_df.drop(columns=cols)
     
@@ -3055,7 +3102,12 @@ def solve_date_with_year(g, implied, phrase_dic, ruler_can_names, dyn_df, era_df
         if 'era_start_year' in df.columns and 'era_end_year' in df.columns:
             era_min = df['era_start_year'].min()
             era_max = df['era_end_year'].max()
-            
+
+            # Check for NaN values
+            if pd.isna(era_min) or pd.isna(era_max) or pd.isna(gz_origin):
+                df['error_str'] = 'Missing era or sexagenary year data'
+                return df, implied
+
             # Calculate cycles elapsed
             cycles_elapsed = int((era_min - gz_origin) / 60)
             last_instance = int(cycles_elapsed * 60 + gz_origin)
@@ -3476,11 +3528,13 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     # Parse XML
     xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
     
-    # Step 1: Extract dates to DataFrame
+    # Step 1: Index date nodes and extract to DataFrame
+    xml_string = index_date_nodes(xml_string)
     df = dates_xml_to_df(xml_string)
     if df.empty:
+        print("DEBUG: extract_date_table_bulk - no dates found in XML")
         return xml_string, pd.DataFrame()
-    
+
     # Step 2: Normalize date fields (convert strings to numbers)
     df = normalise_date_fields(df)
     
@@ -3609,9 +3663,9 @@ def extract_date_table_bulk(xml_string, pg=False, gs=None, lang='en', tpq=-3000,
     else:
         output_df = pd.DataFrame()
 
-    # Return XML string (unchanged)
+    # Return XML string (unchanged) and output dataframe
     xml_string = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
-    
+
     return xml_string, output_df
 
 
@@ -3656,13 +3710,15 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
     df["year_str"] = ""
     mask = df["year"].notna()
     df.loc[mask & (df["year"] == 1), "year_str"] = "元年"
-    df.loc[mask & (df["year"] != 1), "year_str"] = df.loc[mask & (df["year"] != 1), "year"].astype(int).map(lambda x: str(numcon(x)) + "年")
+    df.loc[mask & (df["year"] != 1), "year_str"] = df.loc[mask & (df["year"] != 1) & df["year"].notna(), "year"].astype(int).map(lambda x: str(numcon(x)) + "年")
 
     # Format month strings
     df["month_str"] = ""
     m = df["month"].notna()
     df.loc[m & (df["month"] == 1), "month_str"] = "正月"
-    df.loc[m & (df["month"] != 1), "month_str"] = df.loc[m & (df["month"] != 1), "month"].astype(int).map(lambda x: str(numcon(x)) + "月")
+    df.loc[m & (df["month"] == 13), "month_str"] = "臘月"
+    df.loc[m & (df["month"] == 14), "month_str"] = "一月"
+    df.loc[m & ~df["month"].isin([1, 13, 14]), "month_str"] = df.loc[m & ~df["month"].isin([1, 13, 14]), "month"].astype(int).map(lambda x: str(numcon(x)) + "月")
 
     # Intercalary marker
     df["int_str"] = ""
@@ -3671,18 +3727,18 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
     # Day strings
     df["day_str"] = ""
     d = (df["day"].notna()) & (df.get("lp", 0) != 0)
-    df.loc[d, "day_str"] = df.loc[d, "day"].astype(int).map(lambda x: str(numcon(x)) + "日")
+    df.loc[d, "day_str"] = df.loc[d & df["day"].notna(), "day"].astype(int).map(lambda x: str(numcon(x)) + "日")
 
     # Sexagenary day
     df["gz_str"] = ""
     gz_mask = df["gz"].notna()
-    df.loc[gz_mask, "gz_str"] = df.loc[gz_mask, "gz"].astype(int).map(ganshu)
+    df.loc[gz_mask, "gz_str"] = df.loc[gz_mask & df["gz"].notna(), "gz"].astype(int).map(ganshu)
 
     # Lunar phase
     df["lp_str"] = ""
     lp_mask = df["lp"].notna()
     lp_d = {0: '朔', -1: '晦'}
-    df.loc[lp_mask, "lp_str"] = df.loc[lp_mask, "lp"].astype(int).map(lambda x: lp_d.get(x, ''))
+    df.loc[lp_mask, "lp_str"] = df.loc[lp_mask & df["lp"].notna(), "lp"].astype(int).map(lambda x: lp_d.get(x, ''))
 
     # Date range strings
     df["range_str"] = ""
@@ -3697,8 +3753,8 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
                 df["year"].isna() & df["month"].isna() & df["day"].isna() & df["gz"].isna() & df["lp"].isna()
             )
             df.loc[era_only_mask, "range_str"] = (
-                "年間（" + df.loc[era_only_mask, "era_start_year"].astype(int).astype(str) +
-                "–" + df.loc[era_only_mask, "era_end_year"].astype(int).astype(str) + "）"
+                "年間（" + df.loc[era_only_mask & df["era_start_year"].notna() & df["era_end_year"].notna(), "era_start_year"].astype(int).astype(str) +
+                "–" + df.loc[era_only_mask & df["era_start_year"].notna() & df["era_end_year"].notna(), "era_end_year"].astype(int).astype(str) + "）"
             )
         # else: no era processing needed
     except Exception as e:
@@ -3744,12 +3800,18 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
             (df["jdn"].isna() if "jdn" in df.columns else True) &
             df["year"].notna() & df["month"].isna() & df["day"].isna() & df["gz"].isna() & df["lp"].isna()
         )
-        df.loc[year_only_mask, "jdn_str"] = "（" + df.loc[year_only_mask, "ind_year"].astype(int).astype(str) + "）"
+        df.loc[year_only_mask, "jdn_str"] = "（" + df.loc[year_only_mask & df["ind_year"].notna(), "ind_year"].astype(int).astype(str) + "）"
+
+    # Sexagenary year (like in jy_to_ccs)
+    df["sex_year_str"] = ""
+    if "ind_year" in df.columns:
+        sex_year_mask = df["ind_year"].notna()
+        df.loc[sex_year_mask, "sex_year_str"] = df.loc[sex_year_mask & df["ind_year"].notna(), "ind_year"].astype(int).map(lambda y: f"（歲在{ganshu(gz_year(y))}）")
 
     # Combine all components into report_line
     df["report_line"] = (
         df["dyn_name"] + df["ruler_name"] + df["era_name"] +
-        df["year_str"] + df["int_str"] + df["month_str"] +
+        df["year_str"] + df["sex_year_str"] + df["int_str"] + df["month_str"] +
         df["day_str"] + df["gz_str"] + df["lp_str"] +
         df["range_str"] + df["jdn_str"]
     )
@@ -3794,57 +3856,55 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
     else:
         phrase_dic = phrase_dic_fr
 
-    if sequential:
-        # Convert string to XML, tag all date elements
-        xml_string = tag_date_elements(ui, civ=civ)
-
-        # Consolidate adjacent date elements
-        xml_string = consolidate_date(xml_string)
-
-        # Remove non-date text
-        xml_string = strip_text(xml_string)
+    ui = ui.replace(' ', '')
+    ui = re.sub(r'[,;]', r'\n', ui)
+    items = re.split(r'\n', ui)
+    output_string = ''
+    for item in items:
+        if item != '':
+            # Determine input type 
         
-        # Index date nodes
-        xml_string = index_date_nodes(xml_string)
-        
-        # Load calendar tables
-        tables = prepare_tables(civ=civ)
-        
-        # Extract dates using optimized bulk function
-        xml_string, output_df = extract_date_table_bulk(
-            xml_string, pg=pg, gs=gs, lang=lang,
-            tpq=tpq, taq=taq, jd_out=jd_out, civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
-        )
-
-        # Extract tables for canonical name addition
-        era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
-
-        # Add canonical names to all results
-        if not output_df.empty:
-            output_df = add_can_names_bulk(output_df, ruler_can_names, dyn_df)
-
-        # Generate report from dataframe
-        output_string = generate_report_from_dataframe(output_df, phrase_dic, jd_out)
-
-        output_df.to_csv('debug_output_df.csv')
-
-    else:
-        ui = ui.replace(' ', '')
-        ui = re.sub(r'[,;]', r'\n', ui)
-        items = re.split(r'\n', ui)
-        output_string = ''
-        for item in items:
-            if item != '':
+            # Find Chinese characters
+            is_ccs = bool(re.search(r'[\u4e00-\u9fff]', item))
+            # Find ISO strings
+            isos = re.findall(r'-*\d+-\d+-\d+', item)
+            is_iso = len(isos) > 0
+            # Try to find year / jdn
+            is_y = False
+            is_jdn = False
+            try:
+                value = float(item)
+                if value.is_integer():  # e.g. 10.0 → True
+                    # it's an integer, so maybe a year
+                    if len(item.split('.')[0]) > 5:
+                        is_jdn = True  # large integer, probably JDN
+                        item = float(item)
+                    else:
+                        is_y = True  # short integer, probably a year
+                        item = int(float(item))
+                else:
+                    is_jdn = True  # non-integer numeric, e.g. 168497.5
+                    item = float(item)
+            except ValueError:
+                pass
+            
+            # Proceed according to input type
+            if is_jdn or is_iso:
+                report = jdn_to_ccs(item, proleptic_gregorian=pg, gregorian_start=gs, lang=lang, civ=civ)
+            elif is_y:
+                report = jy_to_ccs(item, lang=lang, civ=civ)
+            elif is_ccs:
                 # Reset implied state for each date in non-sequential mode
-                implied = {
-                    'dyn_id_ls': [],
-                    'ruler_id_ls': [],
-                    'era_id_ls': [],
-                    'year': None,
-                    'month': None,
-                    'intercalary': None,
-                    'sex_year': None
-                }
+                if not sequential:
+                    implied = {
+                        'dyn_id_ls': [],
+                        'ruler_id_ls': [],
+                        'era_id_ls': [],
+                        'year': None,
+                        'month': None,
+                        'intercalary': None,
+                        'sex_year': None
+                    }
 
                 # Convert string to XML, tag all date elements
                 xml_string = tag_date_elements(item, civ=civ)
@@ -3877,5 +3937,6 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=-30
                 # Generate report from dataframe
                 report = generate_report_from_dataframe(output_df, phrase_dic, jd_out)
 
-                output_string += report + '\n\n'
+            output_string += report + '\n\n'
+
     return output_string

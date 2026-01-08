@@ -1,4 +1,0 @@
-,date_index,date_string,has_int,year,sex_year,month,day,gz,lp,intercalary,cal_stream,year_gz_x,dyn_id,ruler_id,era_id,era_start_year,era_end_year,era_start_jdn,era_end_jdn,error_str,ind_year,year_gz_y,lunar_month,lunar_intercalary,nmd_gz,nmd_jdn,hui_jdn,max_day,hui_gz,jdn,ISO_Date,ruler_name,dyn_name
-0,0,七月戊申朔,0,5,,7,1,45,0,0,1,17,46.0,3644.0,48.0,76,84.0,1748870.5,1752000.5,,80,17,7,0,45,1750494.5,1750523.5,30.0,丁丑,1750494.5,0080-08-05,肅宗孝章皇帝劉炟,東漢
-1,0,七月戊申朔,0,5,,7,1,45,0,0,1,1,59.0,4001.0,190.0,360,370.0,1852580.5,1856538.5,,364,1,7,0,45,1854234.5,1854263.5,30.0,丁丑,1854234.5,0364-08-14,幽帝慕容暐,前燕
-2,0,七月戊申朔,0,5,,7,1,45,0,0,3,11,97.0,4132.0,379.0,670,674.0,1965860.5,1967498.5,,674,11,7,0,45,1967454.5,1967483.5,30.0,丁丑,1967454.5,0674-08-07,高宗李治,唐
