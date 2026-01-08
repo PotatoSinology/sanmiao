@@ -87,12 +87,12 @@ def sanitize_gs(gs):
     if not isinstance(gs, (list, tuple)):
         return DEFAULT_GREGORIAN_START
     if len(gs) != 3:
-        return default
+        return DEFAULT_GREGORIAN_START
     try:
         y, m, d = [int(x) for x in gs]
         return [y, m, d]
     except (ValueError, TypeError):
-        return default
+        return DEFAULT_GREGORIAN_START
 
 
 @lru_cache(maxsize=None)
