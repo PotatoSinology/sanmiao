@@ -9,8 +9,6 @@ import lxml.etree as et
 from math import floor
 from functools import lru_cache
 
-# TODO add sequential mode to web app
-
 phrase_dic_en = {
     'ui': 'USER INPUT', 'matches': 'MATCHES', 'nonsense': 'ERROR: You did a nonsense',
     'rule-dyn': 'ERROR: ruler name does not match dynasty;', 'era-rule': "ERROR: era name does not match ruler/dynasty;",
@@ -3178,7 +3176,7 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
     return "\n\n".join(report_blocks)
 
 
-def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True, proliferate=True):
+def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True):
     """
     Main Chinese calendar date interpreter that processes various input formats.
 
@@ -3199,8 +3197,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
         gs = DEFAULT_GREGORIAN_START
     if civ is None:
         civ = ['c', 'j', 'k']
-    if not sequential:
-        proliferate = True
+    proliferate = not sequential
     
     if lang == 'en':
         phrase_dic = phrase_dic_en
