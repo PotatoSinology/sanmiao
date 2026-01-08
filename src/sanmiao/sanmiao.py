@@ -1045,7 +1045,7 @@ def make_leapmonth_from_group1(m):
     """
     return make_leap_month_exact_monthtext(m.group(1))
 
-def make_leapmonth_yue():
+def make_leapmonth_yue(m):
     # "閏月" -> <date><int>閏</int><month>月</month></date>
     return make_leap_month_exact_monthtext("月")
 
