@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.8...HEAD
 [0.1.8]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.5...v0.1.6
