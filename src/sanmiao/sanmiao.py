@@ -865,9 +865,9 @@ def clean_attributes(xml_string):
     return xml_string
 
 
-def strip_text(xml_string):
+def remove_lone_tags(xml_string):
     """
-    Remove all non-date text from XML string
+    Strip lonely dynasties, rulers, and eras
     :param xml_string: str (XML)
     :return: str (XML)
     """
@@ -883,16 +883,24 @@ def strip_text(xml_string):
         tags = [sn.tag for sn in node.xpath('./*')]
         if len(tags) == 1 and tags[0] in ('dyn', 'ruler', 'era'):
             node.tag = 'to_remove'
-    # Find the <p> element
+    # Strip tags
+    et.strip_tags(xml_root, 'to_remove')
+    return xml_root
+
+
+def strip_text(xml_root):
+    """
+    Remove all non-date text from XML string
+    :param xml_string: str (XML)
+    :return: str (XML)
+    """
     # Create a new root element for the filtered output
     new_root = et.Element("root")
     # Copy only <date> elements into the new root
     for date in xml_root.findall(".//date"):
         date.tail = None
         new_root.append(date)
-    # Return to string
-    xml_string = et.tostring(new_root, encoding='utf8').decode('utf8')
-    return xml_string
+    return xml_root
 
 
 SKIP = {"date","year","month","day","gz","sexYear","era","ruler","dyn","suffix","int","lp",
@@ -1334,7 +1342,7 @@ def tag_date_elements(text, civ=None):
     # Strip tags
     et.strip_tags(xml_root, 'to_remove')
     # Return to string
-    text = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
+    text = et.tostring(xml_root, encoding='utf8').decode('utf8')
     
     return text
 
@@ -1427,16 +1435,14 @@ def clean_nested_tags(text):
     et.strip_tags(xml_root, 'to_remove')
     et.strip_tags(xml_root, 'lp_to_remove')
     # Return to string
-    text = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
+    text = et.tostring(xml_root, encoding='utf8').decode('utf8')
     return text
 
 
-def index_date_nodes(xml_string) -> str:
+def index_date_nodes(xml_root) -> str:
     """
     Index date nodes in XML string.
     """
-    xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
-
     # Handle namespaces
     ns = {}
     if xml_root.tag.startswith('{'):
@@ -1448,8 +1454,7 @@ def index_date_nodes(xml_string) -> str:
     for node in xml_root.xpath(date_xpath, namespaces=ns):
         node.set('index', str(index))
         index += 1
-    xml_string = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
-    return xml_string
+    return xml_root
 
 
 def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None):
@@ -1481,15 +1486,13 @@ def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ
     )
 
 
-def dates_xml_to_df(xml_string: str) -> pd.DataFrame:
+def dates_xml_to_df(xml_root: str) -> pd.DataFrame:
     """
     Convert XML string with date elements to pandas DataFrame.
 
     :param xml_string: str, XML string containing date elements
     :return: pd.DataFrame, DataFrame with extracted date information
     """
-    xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
-
     # Handle namespaces - check if root has a default namespace
     ns = {}
     if xml_root.tag.startswith('{'):
@@ -2833,7 +2836,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table,
     return df, updated_implied
 
 
-def extract_date_table_bulk(xml_string, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, sequential=True, proliferate=False):
+def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, sequential=True, proliferate=False):
     """
     Optimized bulk version of extract_date_table using pandas operations.
     
@@ -2842,7 +2845,7 @@ def extract_date_table_bulk(xml_string, implied=None, pg=False, gs=None, lang='e
     2. Bulk candidate generation (all combinations at once)
     3. Sequential constraint solving per date (preserving implied state)
     
-    :param xml_string: XML string with tagged date elements
+    :param xml_root:
     :param pg: bool, proleptic gregorian flag
     :param gs: list, gregorian start date [YYYY, MM, DD]
     :param lang: str, language ('en' or 'fr')
@@ -2853,7 +2856,7 @@ def extract_date_table_bulk(xml_string, implied=None, pg=False, gs=None, lang='e
                    Should be tuple: (era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names)
     :param sequential: bool, intelligently forward fills missing date elements from previous Sinitic date string
     :param proliferate: bool, finds all candidates for date strings without dynasty, ruler, or era
-    :return: tuple (xml_string, report, output_df) - same format as extract_date_table()
+    :return: tuple (xml_string, output_df, implied) - same format as extract_date_table()
     """
     # Defaults
     if gs is None:
@@ -2877,14 +2880,11 @@ def extract_date_table_bulk(xml_string, implied=None, pg=False, gs=None, lang='e
     else:
         phrase_dic = phrase_dic_fr
     
-    # Parse XML
-    xml_root = et.ElementTree(et.fromstring(xml_string)).getroot()
-    
-    # Step 1: Index date nodes and extract to DataFrame
-    xml_string = index_date_nodes(xml_string)
-    df = dates_xml_to_df(xml_string)
+    # Step 1: Extract table
+    df = dates_xml_to_df(xml_root)
     if df.empty:
-        return xml_string, pd.DataFrame()
+        xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
+        return xml_string, pd.DataFrame(), implied
 
     # Step 2: Normalize date fields (convert strings to numbers)
     df = normalise_date_fields(df)
@@ -3000,7 +3000,7 @@ def extract_date_table_bulk(xml_string, implied=None, pg=False, gs=None, lang='e
         output_df = pd.DataFrame()
 
     # Return XML string (unchanged) and output dataframe
-    xml_string = et.tostring(xml_root, encoding='utf8', pretty_print=True).decode('utf8')
+    xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
 
     return xml_string, output_df, implied
 
@@ -3058,7 +3058,7 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
 
     # Intercalary marker
     df["int_str"] = ""
-    df.loc[df.get("intercalary", pd.Series(index=df.index)).fillna(0).astype(int) == 1, "int_str"] = "閏"
+    df.loc[df.get("intercalary", pd.Series(0, index=df.index, dtype=int)) == 1, "int_str"] = "閏"
 
     # Day strings
     df["day_str"] = ""
@@ -3254,18 +3254,21 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Consolidate adjacent date elements
                 xml_string = consolidate_date(xml_string)
 
+                # Remove lone tags
+                xml_root = remove_lone_tags(xml_string)
+
                 # Remove non-date text
-                xml_string = strip_text(xml_string)
-                
+                xml_root = strip_text(xml_root)
+
                 # Index date nodes
-                xml_string = index_date_nodes(xml_string)
+                xml_root = index_date_nodes(xml_root)
                 
                 # Load calendar tables
                 tables = prepare_tables(civ=civ)
                 
                 # Extract dates using optimized bulk function
                 xml_string, output_df, implied = extract_date_table_bulk(
-                    xml_string, implied=implied, pg=pg, gs=gs, lang=lang,
+                    xml_root, implied=implied, pg=pg, gs=gs, lang=lang,
                     tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=False, proliferate=proliferate
                 )
 
