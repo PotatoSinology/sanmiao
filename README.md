@@ -71,6 +71,9 @@ xml_string = tag_date_elements(text, civ=civ)
 # Consolidate adjacent date elements
 xml_string = consolidate_date(xml_string)
 
+# Remove lone dynasties, rulers, and eras
+xml_root = remove_lone_tags(xml_string)
+
 # Index date nodes
 xml_string = index_date_nodes(xml_string)
 
