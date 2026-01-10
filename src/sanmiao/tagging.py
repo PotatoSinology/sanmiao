@@ -23,7 +23,7 @@ YEAR_RE   = re.compile(r"((?:[一二三四五六七八九十]+|十有[一二三�
 LEAPMONTH_RE1 = re.compile(r"閏月")
 LEAPMONTH_RE2 = re.compile(r"閏((?:十[一二]|十有[一二]|正)月)")
 LEAPMONTH_RE3 = re.compile(r"閏((?:[一二三四五六七八九十]|正|臘)月)")
-MONTH_RE1     = re.compile(r"((?:十有[一二]|正)月)")
+MONTH_RE1     = re.compile(r"((?:十有[一二]|十[一二]|正)月)")
 MONTH_RE2     = re.compile(r"((?<![\u4e00-\u9fff])(?:[一二三四五六七八九十]|正|臘)月)")
 
 DAY_RE    = re.compile(r"(([廿卅卌卄丗一二三四五六七八九十]+)日)")
