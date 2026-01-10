@@ -1,3 +1,0 @@
-date_index,dyn_id,ruler_id,era_id,cal_stream,era_start_year,era_end_year,max_year,era_name,date_string,has_int,year,sex_year,month,day,gz,lp,intercalary,error_str,ind_year,year_gz,lunar_month,lunar_intercalary,nmd_gz,nmd_jdn,hui_jdn,max_day,hui_gz,ISO_Date_Start,ISO_Date_End,start_gz,end_gz,ruler_name,dyn_name,year_str
-0,83.0,3853.0,,1.0,424.0,454.0,31.0,,宋太祖三年四月,0,3,,4,,,,0,,426.0,3,4,0,47,1876796.5,1876824.5,29.0,戊寅,0426-05-23,0426-06-20,庚戌,戊寅,太祖文皇帝劉義隆,劉宋,三年
-0,119.0,15305.0,,3.0,960.0,976.0,17.0,,宋太祖三年四月,0,3,,4,,,,0,,962.0,59,4,0,25,2072554.5,2072582.5,29.0,丙辰,0962-05-07,0962-06-04,戊子,丙辰,太祖趙匡胤,宋,三年
