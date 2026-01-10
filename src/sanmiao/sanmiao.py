@@ -1,14 +1,17 @@
-try:
-    from importlib.resources import files
-except ImportError:
-    from importlib_resources import files
 import re
-import time
-import pandas as pd
 import lxml.etree as et
-from math import floor
-from functools import lru_cache
+# Import modules
+from .loaders import prepare_tables
+from .config import (
+    DEFAULT_TPQ, DEFAULT_TAQ, DEFAULT_GREGORIAN_START,
+    phrase_dic_en, phrase_dic_fr
+)
+from .xml_utils import remove_lone_tags, strip_text
+from .reporting import jdn_to_ccs, jy_to_ccs, generate_report_from_dataframe
+from .tagging import tag_date_elements, consolidate_date, index_date_nodes
+from .bulk_processing import extract_date_table_bulk, add_can_names_bulk
 
+<<<<<<< experimental
 phrase_dic_en = {
     'ui': 'USER INPUT', 'matches': 'MATCHES', 'nonsense': 'ERROR: You did a nonsense',
     'rule-dyn': 'ERROR: ruler name does not match dynasty;', 'era-rule': "ERROR: era name does not match ruler/dynasty;",
@@ -3174,6 +3177,8 @@ def generate_report_from_dataframe(output_df, phrase_dic, jd_out):
         report_blocks.append(block.rstrip())
 
     return "\n\n".join(report_blocks)
+=======
+>>>>>>> local
 
 
 def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True):
@@ -3253,9 +3258,18 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
 
                 # Consolidate adjacent date elements
                 xml_string = consolidate_date(xml_string)
+<<<<<<< experimental
 
                 # Remove non-date text
                 xml_string = strip_text(xml_string)
+=======
+                
+                # Remove lone tags
+                xml_root = remove_lone_tags(xml_string)
+                print(et.tostring(xml_root, encoding='utf-8').decode('utf-8'))
+                # Remove non-date text
+                xml_root = strip_text(xml_root)
+>>>>>>> local
                 
                 # Index date nodes
                 xml_string = index_date_nodes(xml_string)
