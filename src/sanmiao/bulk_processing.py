@@ -79,6 +79,31 @@ def dates_xml_to_df(xml_root: str) -> pd.DataFrame:
             "lp_str": get1(".//tei:lp" if ns else ".//lp"),
             "has_int": 1 if node.xpath(".//tei:int" if ns else ".//int", namespaces=ns) else 0,
         }
+
+        # Build present_elements string using hreys mildg coding
+        present_elements = ""
+        if row['dyn_str'] and row['dyn_str'].strip():
+            present_elements += "h"
+        if row['ruler_str'] and row['ruler_str'].strip():
+            present_elements += "r"
+        if row['era_str'] and row['era_str'].strip():
+            present_elements += "e"
+        if row['year_str'] and row['year_str'].strip():
+            present_elements += "y"
+        if row['sexYear_str'] and row['sexYear_str'].strip():
+            present_elements += "s"
+        if row['month_str'] and row['month_str'].strip():
+            present_elements += "m"
+        if row['has_int'] == 1:
+            present_elements += "i"
+        if row['lp_str'] and row['lp_str'].strip():
+            present_elements += "l"
+        if row['day_str'] and row['day_str'].strip():
+            present_elements += "d"
+        if row['gz_str'] and row['gz_str'].strip():
+            present_elements += "g"
+        row['present_elements'] = present_elements
+
         if row['sexYear_str'] is not None:
             row['sexYear_str'] = re.sub(r'[歲年]', '', row['sexYear_str'])
         rows.append(row)
@@ -829,8 +854,7 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
         g = df_candidates[df_candidates['date_index'] == date_idx].copy()
         if g.empty:
             continue
-        print('*'*120)
-        print(implied)
+        
         # Determine what constraints this date has
         has_year = g['year'].notna().any()
         has_sex_year = g['sex_year'].notna().any()
@@ -882,14 +906,13 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
             )
         elif has_month or has_day or has_gz or has_lp:
             # Date with lunar constraints
-            # First handle year if present
-            
+            # First handle year if present            
             if has_year or has_sex_year:
                 g, implied = solve_date_with_year(
                     g, implied, era_df, phrase_dic, tpq, taq,
                     has_month, has_day, has_gz, has_lp
                 )
-            print(g[['ind_year', 'year', 'sex_year']].to_string())
+
             # Apply lunar constraints to the candidates (whether year was solved or not)
             month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
             day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
@@ -947,5 +970,5 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
 
     # Return XML string (unchanged) and output dataframe
     xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
-    
+        
     return xml_string, output_df, implied
