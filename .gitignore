@@ -33,3 +33,6 @@ sql_norbert.py
 # Lock files
 *.lock*
 *~lock*
+
+# Cursor
+*.code-workspace
