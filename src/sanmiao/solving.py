@@ -420,7 +420,11 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
                 else:
                     # Return original candidates if month matching fails completely
                     df = g.copy()
-                    df['error_str'] += "year-month mismatch; "
+                    df = df[df['month'] == df['lunar_month']].copy()
+                    if 'error_str' not in df.columns:
+                        df['error_str'] = ""
+                    df['error_str'] += phrase_dic.get('year-month-mismatch', 'year-month mismatch; ')
+                    
     else:  # If no month constraint but intercalary
         # Fetch month from lunar table
         # Note: this should be fine, because we have matched on cal_stream and ind_year,
@@ -430,7 +434,8 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         else:
             if 'error_str' not in df.columns:
                 df['error_str'] = ""
-            df['error_str'] += "Year-int. month mismatch; "
+            df['error_str'] += phrase_dic.get('year-int-month-mismatch', 'Year-int. month mismatch; ')
+            
     # Handle stop_at_month case (month only, no day/gz/lp)
     if stop_at_month:
         df = preference_filtering_bulk(df, updated_implied)
@@ -453,7 +458,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         del temp['_gz']
         if temp.empty:
             df = g.copy()
-            df['error_str'] += "Lunar phase-gz-day mismatch; "
+            df = df[df['month'] == df['lunar_month']].copy()
+            if 'error_str' not in df.columns:
+                df['error_str'] = ""
+            df['error_str'] += phrase_dic.get('lp-gz-day-mismatch', 'Lunar phase-gz-day mismatch; ')
         else:
             df = temp
             df['jdn'] = df['nmd_jdn'] + df['day'] - 1
@@ -482,7 +490,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             del df['hui_gz']
             if df.empty:
                 df = g.copy()
-                df['error_str'] += "Lunar phase-gz mismatch; "
+                df = df[df['month'] == df['lunar_month']].copy()
+                if 'error_str' not in df.columns:
+                    df['error_str'] = ""
+                df['error_str'] += phrase_dic.get('lp-gz-mismatch', 'Lunar phase-gz mismatch; ')
             else:
                 df['jdn'] = df['hui_jdn']
                 df['day'] = df['max_day']
@@ -490,7 +501,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             df = df[df['gz'] == df['nmd_gz']].copy()
             if df.empty:
                 df = g.copy()
-                df['error_str'] += "Lunar phase-gz mismatch; "
+                df = df[df['month'] == df['lunar_month']].copy()
+                if 'error_str' not in df.columns:
+                    df['error_str'] = ""
+                df['error_str'] += phrase_dic.get('lp-gz-mismatch', 'Lunar phase-gz mismatch; ')
             else:
                 df['jdn'] = df['nmd_jdn']
                 df['day'] = 1
@@ -509,11 +523,13 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
                     else:
                         # Return original candidates if month matching fails completely
                         df = g.copy()
-                        df['error_str'] += "Lunar phase-gz-month mismatch; "
+                        df = df[df['month'] == df['lunar_month']].copy()
+                        df['error_str'] += phrase_dic.get('lp-gz-month-mismatch', 'Lunar phase-gz-month mismatch; ')
                 else:
                     # Return original candidates if month matching fails
                     df = g.copy()
-                    df['error_str'] += "Lunar phase-gz-month mismatch; "
+                    df = df[df['month'] == df['lunar_month']].copy()
+                    df['error_str'] += phrase_dic.get('lp-gz-month-mismatch', 'Lunar phase-gz-month mismatch; ')
             else:
                 df = month_match
     
@@ -532,38 +548,52 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             if df.empty:
                 # Return original candidates if day filtering results in no matches
                 df = g.copy()
-                df['error_str'] += "Month-day-gz mismatch; "
+                df = df[df['month'] == df['lunar_month']].copy()
+                df['error_str'] += phrase_dic.get('month-day-gz-mismatch', 'Month-day-gz mismatch; ')
         else:
             df = g.copy()
+            df = df[df['month'] == df['lunar_month']].copy()
             df['error_str'] += "Month-day-gz mismatch; "
     
     elif has_gz and not has_day and not has_lp:
         # Sexagenary day only
         df['day'] = ((gz - df['nmd_gz']) % 60) + 1
         df = df[df['day'] <= df['max_day']]
-        df = preference_filtering_bulk(df, updated_implied)
-        
-        if len(months) > 0:
-            month_match = df[df['lunar_month'].isin(months)]
-            if month_match.empty:
-                # Try next month
-                next_months = [m + 1 for m in months]
-                month_match = df[df['month'].isin(next_months)]
-                if not month_match.empty:
-                    df = month_match
-                    updated_implied['month'] = next_months[0]
-                    df['error_str'] += "Month-gz mismatch; "
+        if df.empty:
+            df = g.copy()
+            df = df[df['month'] == df['lunar_month']].copy()
+            if 'error_str' not in df.columns:
+                df['error_str'] = ""
+            df['error_str'] += phrase_dic.get('month-day-gz-oob', 'Month-day-gz mismatch (out of bounds); ')
+        else:
+            df = preference_filtering_bulk(df, updated_implied)
+
+            if len(months) > 0:
+                month_match = df[df['lunar_month'].isin(months)]
+                if month_match.empty:
+                    # Try next month
+                    next_months = [m + 1 for m in months]
+                    month_match = df[df['month'].isin(next_months)]
+                    if not month_match.empty:
+                        df = month_match
+                        updated_implied['month'] = next_months[0]
+                        if 'error_str' not in df.columns:
+                            df['error_str'] = ""
+                        df['error_str'] += phrase_dic.get('month-gz-mismatch', 'Month-gz mismatch; ')
+                    else:
+                        # Return original candidates if month matching fails
+                        df = g.copy()
+                        df = df[df['month'] == df['lunar_month']].copy()
+                        if 'error_str' not in df.columns:
+                            df['error_str'] = ""
+                        df['error_str'] += phrase_dic.get('month-gz-mismatch', 'Month-gz mismatch; ')
                 else:
-                    # Return original candidates if month matching fails
-                    df = g.copy()
-                    df['error_str'] += "Month-gz mismatch; "
-            else:
-                df = month_match
-        
-        df['jdn'] = df['day'] + df['nmd_jdn'] - 1
-        df['gz'] = gz
-        if 'nmd_gz' in df.columns:
-            df = df.drop(columns=['nmd_gz'])
+                    df = month_match
+            
+            df['jdn'] = df['day'] + df['nmd_jdn'] - 1
+            df['gz'] = gz
+            if 'nmd_gz' in df.columns:
+                df = df.drop(columns=['nmd_gz'])
     
     elif has_day and not has_gz and not has_lp:
         # Numeric day only
@@ -577,7 +607,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         if df.empty:
             # Return original candidates if day filtering results in no matches
             df = g.copy()
-            df['error_str'] += f"Month-day mismatch (out of bounds); "
+            df = df[df['month'] == df['lunar_month']].copy()
+            if 'error_str' not in df.columns:
+                df['error_str'] = ""
+            df['error_str'] += phrase_dic.get('month-day-oob', 'Month-day mismatch (out of bounds); ')
     
     # Clean up and add names
     df = preference_filtering_bulk(df, updated_implied)
@@ -607,6 +640,9 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
     
     if df.empty:
         df = g.copy()
-        df['error_str'] += "Anomaly in lunar constraint solving; "
-
+        df = df[df['month'] == df['lunar_month']].copy()
+        if 'error_str' not in df.columns:
+            df['error_str'] = ""
+        df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Anomaly in lunar constraint solving; ')
+    
     return df, updated_implied

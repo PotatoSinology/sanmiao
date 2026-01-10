@@ -25,6 +25,7 @@ phrase_dic_en = {
     'lp-gz-mismatch': 'Lunar phase-gz mismatch; ',
     'lp-gz-month-mismatch': 'Lunar phase-gz-month mismatch; ',
     'month-day-gz-mismatch': 'Month-day-gz mismatch; ',
+    'month-gz-mismatch': 'Month-gz mismatch; ',
     'month-sexday-mismatch': 'Month-sexDay mismatch; ',
     'month-day-oob': 'Month-day mismatch (out of bounds); '
 }
@@ -46,6 +47,7 @@ phrase_dic_fr = {
     'lp-gz-mismatch': 'Incompatibilité phase lun.-gz ; ',
     'lp-gz-month-mismatch': 'Incompatibilité phase lun.-gz-mois ; ',
     'month-day-gz-mismatch': 'Incompatibilité mois-jour-gz ; ',
+    'month-gz-mismatch': 'Incompatibilité mois-gz ; ',
     'month-sexday-mismatch': 'Incompatibilité mois-sexJour ; ',
     'month-day-oob': 'Incompatibilité mois-jour (hors limites) ; '
 }
