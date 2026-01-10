@@ -1,17 +1,14 @@
-# Import configuration and utilities
-from .config import (
-    phrase_dic_en, phrase_dic_fr, DEFAULT_TPQ, DEFAULT_TAQ, DEFAULT_GREGORIAN_START
-)
-from .tagging import tag_date_elements, consolidate_date, index_date_nodes
-from .xml_utils import strip_text, remove_lone_tags
-from .bulk_processing import extract_date_table_bulk, add_can_names_bulk
-from .reporting import generate_report_from_dataframe
-from .loaders import prepare_tables
-from .converters import jdn_to_ccs, jy_to_ccs
-
-# Standard library imports
+try:
+    from importlib.resources import files
+except ImportError:
+    from importlib_resources import files
+import time
+import pandas as pd
+from math import floor
+from functools import lru_cache
 import re
-
+import lxml.etree as et
+# Import modules
 def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True):
     """
     Main Chinese calendar date interpreter that processes various input formats.
@@ -90,21 +87,24 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Consolidate adjacent date elements
                 xml_string = consolidate_date(xml_string)
 
+                # Remove non-date text
+                xml_string = strip_text(xml_string)
+                
                 # Remove lone tags
                 xml_root = remove_lone_tags(xml_string)
-
+                print(et.tostring(xml_root, encoding='utf-8').decode('utf-8'))
                 # Remove non-date text
                 xml_root = strip_text(xml_root)
-
+                
                 # Index date nodes
-                xml_root = index_date_nodes(xml_root)
+                xml_string = index_date_nodes(xml_string)
                 
                 # Load calendar tables
                 tables = prepare_tables(civ=civ)
                 
                 # Extract dates using optimized bulk function
                 xml_string, output_df, implied = extract_date_table_bulk(
-                    xml_root, implied=implied, pg=pg, gs=gs, lang=lang,
+                    xml_string, implied=implied, pg=pg, gs=gs, lang=lang,
                     tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=False, proliferate=proliferate
                 )
 
@@ -114,7 +114,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Add canonical names to all results
                 if not output_df.empty:
                     output_df = add_can_names_bulk(output_df, ruler_can_names, dyn_df)
-                
+
                 # Generate report from dataframe
                 report = generate_report_from_dataframe(output_df, phrase_dic, jd_out)
 

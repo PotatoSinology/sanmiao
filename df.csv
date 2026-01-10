@@ -1,0 +1,5 @@
+date_index,dyn_id,ruler_id,era_id,cal_stream,era_start_year,era_end_year,max_year,era_name,date_string,has_int,year,sex_year,month,day,gz,lp,intercalary,error_str,ruler_name,dyn_name,year_str
+0,42.0,,,1.0,-205.0,220.0,,,漢,0,,,,,,,,,,漢,
+0,43.0,,,1.0,-205.0,9.0,,,漢,0,,,,,,,,,,西漢,
+0,46.0,,,1.0,25.0,220.0,,,漢,0,,,,,,,,,,東漢,
+0,,,,,,,,,漢,0,,,,,,,,,,,
