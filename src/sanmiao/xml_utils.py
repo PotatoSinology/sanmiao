@@ -40,21 +40,22 @@ def clean_attributes(xml_string: str) -> str:
     return xml_string
 
 
-def remove_lone_tags(xml_string: str) -> str:
+def remove_lone_tags(xml_string: str) -> et._Element:
     """
     Remove lone date tags that don't contain meaningful content.
 
     :param xml_string: XML string
-    :return: XML string with lone tags removed
+    :return: XML element with lone tags removed
     """
     # Parse XML
     try:
-        root = et.fromstring(xml_string.encode('utf-8'))
+        xml_root = et.fromstring(xml_string.encode('utf-8'))
     except et.ParseError:
-        return xml_string
+        # Return a dummy element if parsing fails
+        return et.Element("root")
 
     # Find and remove lone date tags
-    for date_elem in root.xpath('.//date'):
+    for date_elem in xml_root.xpath('.//date'):
         has_content = False
 
         # Check if date has meaningful child elements or text
@@ -69,7 +70,7 @@ def remove_lone_tags(xml_string: str) -> str:
             if parent is not None:
                 parent.remove(date_elem)
 
-    return root
+    return xml_root
 
 
 def strip_text(xml_root: et._Element) -> et._Element:

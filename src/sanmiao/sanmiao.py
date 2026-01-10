@@ -95,7 +95,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 xml_string = tag_date_elements(item, civ=civ)
 
                 # Consolidate adjacent date elements
-                xml_root = consolidate_date(xml_string)
+                xml_string = consolidate_date(xml_string)
 
                 # Remove lone tags
                 xml_root = remove_lone_tags(xml_string)

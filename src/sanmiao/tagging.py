@@ -523,13 +523,12 @@ def consolidate_date(text):
         text = re.sub(rf'</{tup[0]}></date>，*<date><{tup[1]}', f'</{tup[0]}><{tup[1]}', text)
         if 'metadata' in text:
             text = clean_attributes(text)
-    # Parse to XML
+    # Parse to XML and return as string
     try:
-        xml_root = et.ElementTree(et.fromstring(text)).getroot()
-        return xml_root
+        et.ElementTree(et.fromstring(text)).getroot()
+        return text
     except et.ParseError:
-        xml_root = et.Element("root")
-        return xml_root
+        return "<root/>"
 
 
 def clean_nested_tags(text):
@@ -573,9 +572,9 @@ def clean_nested_tags(text):
     return text
 
 
-def index_date_nodes(xml_root) -> str:
+def index_date_nodes(xml_root) -> et._Element:
     """
-    Index date nodes in XML string.
+    Index date nodes in XML element.
     """
     # Handle namespaces
     ns = {}

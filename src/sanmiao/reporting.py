@@ -217,8 +217,7 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, 
         iso = jdn_to_iso(jdn, proleptic_gregorian, gregorian_start)
     output_string = f'{phrase_dic.get("ui")}: {iso} (JD {jdn})\n{phrase_dic.get("matches")}:\n'
     # Load CSV tables
-    era_df, dyn_df, ruler_df, lunar_table = prepare_tables(civ=civ)
-    ruler_tag_df = load_csv('rul_can_name.csv')[['person_id', 'string']]
+    era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = prepare_tables(civ=civ)
     # Filter ruler_tag_df by filtered rulers
     if not ruler_df.empty:
         valid_person_ids = ruler_df['person_id'].unique()
@@ -231,7 +230,7 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, 
         df = era_df[(era_df['era_start_jdn'] <= jdn) & (era_df['era_end_jdn'] > jdn)].drop_duplicates(subset=['era_id'])
         df = df[['dyn_id', 'cal_stream', 'era_id', 'ruler_id', 'era_name', 'era_start_year']].rename(columns={'ruler_id': 'person_id'})
         # Get ruler names
-        df = df.merge(ruler_tag_df, how='left', on='person_id')
+        df = df.merge(ruler_can_names, how='left', on='person_id')
         df = df.rename(columns={'person_id': 'ruler_id', 'string': 'ruler_name'})
         # Get dynasty names
         df = df.merge(dyn_df[['dyn_id', 'dyn_name']], how='left', on='dyn_id')
@@ -376,8 +375,7 @@ def jy_to_ccs(y, lang='en', civ=None):
             fill = f"{int(abs(y)) + 1} av. J.-C."
     output_string = f'{phrase_dic.get("ui")}: {y} ({fill})\n{phrase_dic.get("matches")}:\n'
     # Load CSV tables
-    era_df, dyn_df, ruler_df, lunar_table = prepare_tables(civ=civ)
-    ruler_tag_df = load_csv('rul_can_name.csv')[['person_id', 'string']]
+    era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = prepare_tables(civ=civ)
     # Filter ruler_tag_df by filtered rulers
     if not ruler_df.empty:
         valid_person_ids = ruler_df['person_id'].unique()

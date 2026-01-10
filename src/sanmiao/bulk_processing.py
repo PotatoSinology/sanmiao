@@ -855,25 +855,24 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                     has_month, has_day, has_gz, has_lp
                 )
 
-            else:
-                month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
-                day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
-                gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
-                lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
-                intercalary_val = 1 if has_intercalary else None
+            # Apply lunar constraints to the candidates (whether year was solved or not)
+            month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
+            day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
+            gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
+            lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
+            intercalary_val = 1 if has_intercalary else None
 
-                result_df, implied = solve_date_with_lunar_constraints(
-                    g, implied, lunar_table, phrase_dic,
-                    month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
-                    tpq=tpq, taq=taq, pg=pg, gs=gs
-                )
-                # If lunar constraints resulted in no matches (likely due to corruption),
-                # return the original input dataframe instead of empty
-                if result_df.empty:
-                    result_df = g.copy()
-                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
-                    result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
-
+            result_df, implied = solve_date_with_lunar_constraints(
+                g, implied, lunar_table, phrase_dic,
+                month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
+                tpq=tpq, taq=taq, pg=pg, gs=gs
+            )
+            # If lunar constraints resulted in no matches (likely due to corruption),
+            # return the original input dataframe instead of empty
+            if result_df.empty:
+                result_df = g.copy()
+                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
 
             # Add metadata to result_df if not empty
             if not result_df.empty:
