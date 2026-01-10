@@ -507,7 +507,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                     (t_out['nmd_jdn'] >= t_out['era_start_jdn']) &
                     (t_out['hui_jdn'] <= t_out['era_end_jdn'])
                 ]
-
+                
                 # Filter by year
                 if not t_out.dropna(subset=['year']).empty:
                     t_out['_ind_year'] = t_out['year'] + t_out['era_start_year'] - 1
@@ -543,47 +543,6 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 date_rows['date_index'] = date_idx
 
                 all_candidates.extend(date_rows.to_dict('records'))
-                
-                """
-                # DPM: I think that this was slower
-                base = date_rows.copy()
-                base['_tmp'] = 1
-                master_table['_tmp'] = 1
-
-                date_rows = base.merge(master_table, on='_tmp').drop(columns=['_tmp'])
-
-                # Filter by civ
-                cal_streams = get_cal_streams_from_civ(civ)
-                if cal_streams is not None:
-                    date_rows = date_rows[date_rows['cal_stream'].isin(cal_streams)]
-
-                # Build ind_year
-                if date_rows['year'].dropna().empty:
-                    date_rows = date_rows.dropna(subset=['era_start_year', 'era_end_year'])
-                    # Ensure no NaN values remain before conversion
-                    date_rows = date_rows[date_rows['era_start_year'].notna() & date_rows['era_end_year'].notna()]
-                    date_rows['era_start_year'] = date_rows['era_start_year'].astype(int)
-                    date_rows['era_end_year'] = date_rows['era_end_year'].astype(int)
-
-                    date_rows['ind_year'] = [
-                        list(range(s, e + 1))
-                        for s, e in zip(date_rows['era_start_year'], date_rows['era_end_year'])
-                    ]
-                    date_rows = date_rows.explode('ind_year', ignore_index=True)
-                else:
-                    date_rows['ind_year'] = date_rows['year'] + date_rows['era_start_year'] - 1
-
-                # Filter by tpq / taq
-                date_rows = date_rows[
-                    (date_rows['ind_year'] >= tpq) &
-                    (date_rows['ind_year'] <= taq)
-                ]
-
-                date_rows['date_index'] = date_idx
-                date_rows = date_rows.drop(columns=['ind_year'], errors='ignore')
-
-                all_candidates.extend(date_rows.to_dict('records'))
-                """
         
             continue
 
@@ -745,7 +704,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 candidates_df[col] = candidates_df[col].astype('float64')
     else:
         # Return empty DataFrame with expected columns
-        candidates_df = pd.DataFrame(columns=['date_index'])
+        candidates_df = df_with_ids.copy()
     
     # # Ensure cal_stream is set (default to 1 if missing)
     # # Commented out - problem is solved elsewhere
@@ -758,79 +717,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     cols = [i for i in cols if i in candidates_df.columns]
     candidates_df = candidates_df.drop(columns=cols)
     
-    return candidates_df
-
-
-def preference_filtering_bulk(table, implied):
-    """
-    Apply preference filtering based on implied state.
-    
-    This filters candidate rows using implied state from previous dates.
-    If filtering results in empty table, revert to original (fail gracefully).
-    
-    :param table: DataFrame with candidate rows to filter
-    :param implied: dict with keys like 'dyn_id_ls', 'ruler_id_ls', 'era_id_ls', 'month', 'intercalary'
-    :return: Filtered DataFrame (or original if filtering fails)
-    """
-    if table.shape[0] < 2:
-        return table
-    
-    bu = table.copy()
-    
-    # Filter by implied era_id list
-    era_id_ls = implied.get('era_id_ls', [])
-    if 'era_id' in table.columns and len(era_id_ls) > 0:
-        table = table[table['era_id'].isin(era_id_ls)]
-        if table.empty:
-            table = bu.copy()
-        else:
-            bu = table.copy()
-    
-    # Filter by implied ruler_id list
-    ruler_id_ls = implied.get('ruler_id_ls', [])
-    if 'ruler_id' in table.columns and len(ruler_id_ls) > 0:
-        table = table[table['ruler_id'].isin(ruler_id_ls)]
-        if table.empty:
-            table = bu.copy()
-        else:
-            bu = table.copy()
-    
-    # Filter by implied dyn_id list
-    dyn_id_ls = implied.get('dyn_id_ls', [])
-    if 'dyn_id' in table.columns and len(dyn_id_ls) > 0:
-        table = table[table['dyn_id'].isin(dyn_id_ls)]
-        if table.empty:
-            table = bu.copy()
-        else:
-            bu = table.copy()
-    
-    # Filter by implied month
-    mn = implied.get('month')
-    if 'month' in table.columns and mn is not None:
-        if table.shape[0] > 1:
-            mos = table.dropna(subset=['month'])['month'].unique()
-            if len(mos) > 1:
-                table = table[table['month'] == mn]
-            if table.empty:
-                table = bu.copy()
-            else:
-                bu = table.copy()
-    
-    # Filter by implied intercalary
-    inter = implied.get('intercalary')
-    bu = table.copy()
-    if 'intercalary' in table.columns and inter is not None:
-        if table.shape[0] > 1:
-            intercalarys = table.dropna(subset=['intercalary'])['intercalary'].unique()
-            if len(intercalarys) > 1:
-                table = table[table['intercalary'] == inter]
-            if table.empty:
-                table = bu.copy()
-            else:
-                bu = table.copy()
-    
-    table = table.drop_duplicates()
-    return table
+    return candidates_df.drop_duplicates().reset_index(drop=True)
 
 
 def add_can_names_bulk(table, ruler_can_names, dyn_df):
@@ -967,29 +854,25 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                     g, implied, era_df, phrase_dic, tpq, taq,
                     has_month, has_day, has_gz, has_lp
                 )
-            # Then handle lunar constraints [sex_year is fine at this point]
-            if g.empty:
-                # If g became empty after year filtering, create empty result
-                result_df = pd.DataFrame()
-                
+
             else:
                 month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
                 day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
                 gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
                 lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
                 intercalary_val = 1 if has_intercalary else None
+
                 result_df, implied = solve_date_with_lunar_constraints(
                     g, implied, lunar_table, phrase_dic,
                     month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
                     tpq=tpq, taq=taq, pg=pg, gs=gs
                 )
-                result_df.to_csv('result_df.csv', index=False)
                 # If lunar constraints resulted in no matches (likely due to corruption),
                 # return the original input dataframe instead of empty
                 if result_df.empty:
-                    df = g.copy()
-                    df['error_str'] += "Anomaly in lunar constraint solving; "
-                    # raise Exception("External fallback sigma, should not be necessary")
+                    result_df = g.copy()
+                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
 
 
             # Add metadata to result_df if not empty
@@ -1005,7 +888,8 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
             # If year-only date solving resulted in no matches, return original candidates
             if result_df.empty:
                 result_df = g.copy()
-                result_df['error_str'] += "Year-only date solving failed; "
+                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                result_df['error_str'] += phrase_dic.get('year-solving-failed', 'Year resolution failed; ')
 
         # Add date_index and date_string to result
         if not result_df.empty:

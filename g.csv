@@ -1,5 +1,2 @@
-date_index,era_id,ruler_id,dyn_id,cal_stream,era_start_year,era_end_year,max_year,era_name,date_string,has_int,year,sex_year,month,day,gz,lp,intercalary,error_str
-0,10.0,3839.0,43.0,1.0,-103,-100.0,4.0,太初,太初二年,0,2,,,,,,,
-0,199.0,3680.0,62.0,1.0,386,394.0,9.0,太初,太初二年,0,2,,,,,,,
-0,215.0,298.0,65.0,1.0,388,400.0,13.0,太初,太初二年,0,2,,,,,,,
-0,226.0,278.0,67.0,1.0,397,399.0,3.0,太初,太初二年,0,2,,,,,,,
+date_index,era_id,ruler_id,dyn_id,cal_stream,era_start_year,era_end_year,max_year,era_name,date_string,has_int,year,sex_year,month,day,gz,lp,intercalary,error_str,ind_year
+0,82.0,3656.0,46.0,1.0,196,220.0,25.0,建安,獻帝建安十八年二月,0,18,,2,,,,,,213

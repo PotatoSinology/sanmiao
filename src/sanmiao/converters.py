@@ -27,40 +27,37 @@ _GANZHI_PINYIN_TO_NUM = {
     'jiashen': 21, 'yiyou': 22, 'bingxu': 23, 'dinghai': 24, 'wuzi': 25, 'jichou': 26, 'gengyin': 27, 'xinmao': 28, 'renchen': 29, 'guisi': 30,
     'jiawu': 31, 'yiwei': 32, 'bingshen': 33, 'dingyou': 34, 'wuxu': 35, 'jihai': 36, 'gengzi': 37, 'xinchou': 38, 'renyin': 39, 'guimao': 40,
     'jiachen': 41, 'yisi': 42, 'bingwu': 43, 'dingwei': 44, 'wushen': 45, 'jiyou': 46, 'gengxu': 47, 'xinhai': 48, 'renzi': 49, 'guichou': 50,
-    'jiayin': 51, 'yimiao': 52, 'bingchen': 53, 'dingsi': 54, 'wuwu': 55, 'jiwei': 56, 'gengshen': 57, 'xinyou': 58, 'renxu': 59, 'guihai': 60,
+    'jiayin': 51, 'yimao': 52, 'bingchen': 53, 'dingsi': 54, 'wuwu': 55, 'jiwei': 56, 'gengshen': 57, 'xinyou': 58, 'renxu': 59, 'guihai': 60,
 }
 _NUM_TO_GANZHI_PINYIN = {v: k for k, v in _GANZHI_PINYIN_TO_NUM.items()}
 
 
 def gz_year(num: int) -> int:
     """
-    Convert Western year to sexagenary year number.
-
-    :param num: Western year (int)
-    :return: Sexagenary year number (int)
+    Converts Western calendar year to sexagenary year (numerical)
+    :param num: int
+    :return: int
     """
-    if num > 0:
-        return ((num - 1984) % 60) + 1
-    else:
-        return ((num - 1983) % 60) + 1
+    x = (num - 4) % 60 + 1
+    return x
 
 
 def jdn_to_gz(jdn: int, en: bool = False) -> str:
     """
-    Convert Julian Day Number to sexagenary day string.
-
-    :param jdn: Julian Day Number
-    :param en: English output flag
-    :return: Sexagenary day string
+    Convert from Julian day number (JDN) to sexagenary day, with output in Pinyin (en=True) or Chinese (en=False).
+    :param jdn: float
+    :param en: bool
     """
-    gz_num = ((jdn - 11) % 60) + 1
-    return ganshu(gz_num, en)
+    jdn = int(jdn - 9.5) % 60
+    if jdn == 0:
+        jdn = 60
+    gz = ganshu(jdn, en)
+    return gz
 
 
-def ganshu(gz_in: Union[int, str], en: bool = False) -> str:
+def ganshu(gz_in, en=False):
     """
     Convert from sexagenary counter (string) to number (int) and vice versa.
-
     :param gz_in: str, int, or float
     :param en: Boolean, whether into Pinyin (vs Chinese)
     :return: int or str
@@ -198,85 +195,138 @@ def numcon(x):
         return s
 
 
-def iso_to_jdn(date_string: str, proleptic_gregorian: bool = False,
-               gregorian_start: list = None) -> int:
+def sanitize_gs(gs):
     """
-    Convert ISO date string to Julian Day Number.
+    Return a list [year, month, day] of ints if valid,
+    otherwise the default [1582, 10, 15].
+    """
+    if not isinstance(gs, (list, tuple)):
+        return DEFAULT_GREGORIAN_START
+    if len(gs) != 3:
+        return DEFAULT_GREGORIAN_START
+    try:
+        y, m, d = [int(x) for x in gs]
+        return [y, m, d]
+    except (ValueError, TypeError):
+        return DEFAULT_GREGORIAN_START
 
-    :param date_string: ISO date string (YYYY-MM-DD)
-    :param proleptic_gregorian: Use proleptic Gregorian calendar
-    :param gregorian_start: Gregorian start date [YYYY, MM, DD]
-    :return: Julian Day Number
+
+def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=None):
     """
+    Convert a date string (YYYY-MM-DD) to a Julian Day Number (JDN).
+
+    :param date_string: str (date in "YYYY-MM-DD" format, e.g., "2023-01-01" or "-0044-03-15")
+    :param proleptic_gregorian: bool
+    :param gregorian_start: list
+    :return: float (Julian Day Number) or None if invalid
+    """
+    # Defaults
     if gregorian_start is None:
         gregorian_start = DEFAULT_GREGORIAN_START
+
+    # Validate inputs
+    if not re.match(r'^-?\d+-\d+-\d+$', date_string):
+        return None
 
     try:
-        year, month, day = map(int, date_string.split('-'))
+        # Handle negative year
+        if date_string[0] == '-':
+            mult = -1
+            date_string = date_string[1:]
+        else:
+            mult = 1
+
+        # Split and convert to integers
+        year, month, day = map(int, date_string.split("-"))
+        year *= mult
+
+        # Validate month and day
+        if not (1 <= month <= 12) or not (1 <= day <= 31):  # Basic validation
+            return None
+
+        # Determine calendar for historical mode
+        gregorian_start = sanitize_gs(gregorian_start)
+        is_julian = False
+        a, b, c = gregorian_start
+        if not proleptic_gregorian:
+            if year < a:
+                is_julian = True
+            elif year == a and month < b:
+                is_julian = True
+            elif year == a and month == b and day <= c:
+                is_julian = True
+
+        # Adjust months and years so March is the first month
+        if month <= 2:
+            year -= 1
+            month += 12
+
+        # Calculate JDN
+        if proleptic_gregorian or not is_julian:
+            # Gregorian calendar
+            a = floor(year / 100)
+            b = floor(a / 4)
+            c = 2 - a + b
+            jdn = floor(365.25 * (year + 4716)) + floor(30.6001 * (month + 1)) + day + c - 1524.5
+        else:
+            # Julian calendar
+            jdn = floor(365.25 * (year + 4716)) + floor(30.6001 * (month + 1)) + day - 1524.5
+
+        return jdn
     except ValueError:
-        raise ValueError(f"Invalid date format: {date_string}")
-
-    # Gregorian calendar start
-    gy, gm, gd = gregorian_start
-
-    # Determine if date is before Gregorian start
-    gregorian = proleptic_gregorian or (year > gy or
-                                        (year == gy and month > gm) or
-                                        (year == gy and month == gm and day >= gd))
-
-    # Julian Day Number calculation
-    if month <= 2:
-        year -= 1
-        month += 12
-
-    a = floor(year / 100) if gregorian else 0
-    b = 2 - a + floor(a / 4) if gregorian else 0
-
-    jd = floor(365.25 * (year + 4716)) + floor(30.6001 * (month + 1)) + day + b - 1524
-
-    return jd
+        return None
 
 
-def jdn_to_iso(jdn: int, proleptic_gregorian: bool = False,
-               gregorian_start: list = None) -> str:
+def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=None):
     """
-    Convert Julian Day Number to ISO date string.
+    Convert a Julian Day Number (JDN) to a date string (YYYY-MM-DD).
 
-    :param jdn: Julian Day Number
-    :param proleptic_gregorian: Use proleptic Gregorian calendar
-    :param gregorian_start: Gregorian start date [YYYY, MM, DD]
-    :return: ISO date string (YYYY-MM-DD)
+    :param jdn: int or float (e.g., 2299159.5 = 1582-10-15)
+    :param proleptic_gregorian: bool
+    :param gregorian_start: list
+    :return: str (ISO date string) or None if invalid
     """
+    # Defaults
     if gregorian_start is None:
         gregorian_start = DEFAULT_GREGORIAN_START
 
-    gy, gm, gd = gregorian_start
-
-    # Gregorian calendar adjustment
-    z = jdn + 68569
-    w = floor((4 * z) / 146097)
-    x = z - floor((146097 * w) / 4)
-    y = floor((4000 * (x + 1)) / 1461001)
-    z = x - floor((1461 * y) / 4) + 31
-    m = floor((80 * z) / 2447)
-    d = z - floor((2447 * m) / 80)
-    z = floor(m / 11)
-    m = m + 2 - 12 * z
-    y = 100 * (w - 49) + y + z
-
-    # Determine if we should use Gregorian calendar
-    gregorian = proleptic_gregorian or (y > gy or
-                                        (y == gy and m > gm) or
-                                        (y == gy and m == gm and d >= gd))
-
-    if not gregorian:
-        # Convert back to Julian if before Gregorian start
-        # This is a simplified conversion - in practice this would need more complex logic
-        pass
-
-    return f"{y:04d}-{m:02d}-{d:02d}"
-
-
+    # Get Gregorian reform JDN
+    gregorian_start = sanitize_gs(gregorian_start)
+    gs_str = f"{gregorian_start[0]}-{gregorian_start[1]}-{gregorian_start[2]}"
+    gs_jdn = iso_to_jdn(gs_str, proleptic_gregorian, gregorian_start)
+    if not isinstance(jdn, (int, float)):
+        return None
+    try:
+        jdn = floor(jdn + 0.5)
+        is_julian = not proleptic_gregorian and jdn < gs_jdn
+        if proleptic_gregorian or not is_julian:
+            a = jdn + 32044
+            b = floor((4 * a + 3) / 146097)
+            c = a - floor((146097 * b) / 4)
+            d = floor((4 * c + 3) / 1461)
+            e = c - floor((1461 * d) / 4)
+            m = floor((5 * e + 2) / 153)
+            day = e - floor((153 * m + 2) / 5) + 1
+            month = m + 3 - 12 * floor(m / 10)
+            year = 100 * b + d - 4800 + floor(m / 10)
+        else:
+            a = jdn + 32082
+            b = floor((4 * a + 3) / 1461)
+            c = a - floor((1461 * b) / 4)
+            m = floor((5 * c + 2) / 153)
+            day = c - floor((153 * m + 2) / 5) + 1
+            month = m + 3 - 12 * floor(m / 10)
+            year = b - 4800 + floor(m / 10)
+        if year <= 0:
+            year_str = f"-{abs(year):04d}"
+        else:
+            year_str = f"{year:04d}"
+        date_str = f"{year_str}-{month:02d}-{day:02d}"
+        if not re.match(r'^-?\d{4}-\d{2}-\d{2}$', date_str):
+            return None
+        return date_str
+    except (ValueError, OverflowError):
+        return None
 
 
 def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, lang='en', civ=None):

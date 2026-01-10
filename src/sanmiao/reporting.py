@@ -59,7 +59,7 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
     mask = df["year"].notna()
     df.loc[mask & (df["year"] == 1), "year_str"] = "元年"
     df.loc[mask & (df["year"] != 1), "year_str"] = df.loc[mask & (df["year"] != 1) & df["year"].notna(), "year"].astype(int).map(lambda x: str(numcon(x)) + "年")
-
+    df.to_csv('df.csv', index=False)
     # Format month strings
     df["month_str"] = ""
     m = df["month"].notna()
