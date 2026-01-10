@@ -96,7 +96,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
 
                 # Consolidate adjacent date elements
                 xml_string = consolidate_date(xml_string)
-
+                
                 # Remove lone tags
                 xml_root = remove_lone_tags(xml_string)
                 
@@ -112,7 +112,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Extract dates using optimized bulk function
                 xml_string, output_df, implied = extract_date_table_bulk(
                     xml_root, implied=implied, pg=pg, gs=gs, lang=lang,
-                    tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=False, proliferate=proliferate
+                    tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
                 )
 
                 # Extract tables for canonical name addition

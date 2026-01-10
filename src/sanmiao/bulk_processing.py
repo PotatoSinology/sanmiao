@@ -778,6 +778,7 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
     
     if implied is None:
         implied = {
+            'cal_stream_ls': [],
             'dyn_id_ls': [],
             'ruler_id_ls': [],
             'era_id_ls': [],
@@ -815,7 +816,7 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
     
     # Step 5: Bulk generate candidates (Phase 2) 
     df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
-
+    
     # Add report note
     df_candidates['error_str'] = ""
     
@@ -828,7 +829,8 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
         g = df_candidates[df_candidates['date_index'] == date_idx].copy()
         if g.empty:
             continue
-        
+        print('*'*120)
+        print(implied)
         # Determine what constraints this date has
         has_year = g['year'].notna().any()
         has_sex_year = g['sex_year'].notna().any()
@@ -837,6 +839,38 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
         has_gz = g['gz'].notna().any() and not g['gz'].isna().all()
         has_lp = g['lp'].notna().any() and not g['lp'].isna().all()
         has_intercalary = g[g['has_int'] == 1].shape[0] == g.shape[0]
+        
+        # Apply implied values to incomplete candidates
+        no_year = not (has_year or has_sex_year)
+        no_month = not (has_month or has_intercalary)
+        no_day = not (has_day or has_gz or has_lp)
+        
+        if sequential:
+            if no_year:  # No year but some sort of day
+                if not no_month or not no_day:
+                    # Pick up year and everything higher from implied
+                    if (implied.get('cal_stream_ls') and len(implied['cal_stream_ls']) == 1 and ('cal_stream' not in g.columns or g['cal_stream'].isna().all())):
+                        g['cal_stream'] = implied['cal_stream_ls'][0]
+                    if (implied.get('dyn_id_ls') and len(implied['dyn_id_ls']) == 1 and ('dyn_id' not in g.columns or g['dyn_id'].isna().all())):
+                        g['dyn_id'] = implied['dyn_id_ls'][0]
+                    if (implied.get('ruler_id_ls') and len(implied['ruler_id_ls']) == 1 and ('ruler_id' not in g.columns or g['ruler_id'].isna().all())):
+                        g['ruler_id'] = implied['ruler_id_ls'][0]
+                    if (implied.get('era_id_ls') and len(implied['era_id_ls']) == 1 and ('era_id' not in g.columns or g['era_id'].isna().all())):
+                        g['era_id'] = implied['era_id_ls'][0]
+                        bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
+                        g['era_start_year'] = bloc['era_start_year'].values[0]
+                    if implied.get('year') is not None and ('year' not in g.columns or g['year'].isna().all()):
+                        g['year'] = implied['year']
+                    if implied.get('sex_year') is not None and ('sex_year' not in g.columns or g['sex_year'].isna().all()):
+                        g['sex_year'] = implied['sex_year']
+                    has_year = True
+                # If there is no month, pick that up
+                if no_month:
+                    if implied.get('month') is not None and ('month' not in g.columns or g['month'].isna().all()):
+                        g['month'] = implied['month']
+                    if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
+                        g['intercalary'] = implied['intercalary']
+                    has_month = True
         
         # Determine date type
         is_simple = not has_year and not has_sex_year and not has_month and not has_day and not has_gz and not has_lp
@@ -849,18 +883,20 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
         elif has_month or has_day or has_gz or has_lp:
             # Date with lunar constraints
             # First handle year if present
+            
             if has_year or has_sex_year:
                 g, implied = solve_date_with_year(
                     g, implied, era_df, phrase_dic, tpq, taq,
                     has_month, has_day, has_gz, has_lp
                 )
+            print(g[['ind_year', 'year', 'sex_year']].to_string())
             # Apply lunar constraints to the candidates (whether year was solved or not)
             month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
             day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
             gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
             lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
             intercalary_val = 1 if has_intercalary else None
-            
+
             result_df, implied = solve_date_with_lunar_constraints(
                 g, implied, lunar_table, phrase_dic,
                 month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
@@ -872,7 +908,8 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                 result_df = g.copy()
                 phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
                 result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
-                return xml_string, output_df, implied
+                xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
+                return xml_string, result_df, implied
 
             # Add metadata to result_df if not empty
             if not result_df.empty:
