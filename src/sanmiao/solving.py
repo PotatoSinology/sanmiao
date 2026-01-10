@@ -13,7 +13,7 @@ def preference_filtering_bulk(table, implied):
     If filtering results in empty table, revert to original (fail gracefully).
     
     :param table: DataFrame with candidate rows to filter
-    :param implied: dict with keys like 'dyn_id_ls', 'ruler_id_ls', 'era_id_ls', 'month', 'intercalary'
+    :param implied: dict with keys like 'dyn_id_ls', 'ruler_id_ls', 'era_id_ls', 'cal_stream_ls', 'month', 'intercalary'
     :return: Filtered DataFrame (or original if filtering fails)
     """
     if table.shape[0] < 2:
@@ -47,7 +47,16 @@ def preference_filtering_bulk(table, implied):
             table = bu.copy()
         else:
             bu = table.copy()
-    
+
+    # Filter by implied cal_stream list
+    cal_stream_ls = implied.get('cal_stream_ls', [])
+    if 'cal_stream' in table.columns and len(cal_stream_ls) > 0:
+        table = table[table['cal_stream'].isin(cal_stream_ls)]
+        if table.empty:
+            table = bu.copy()
+        else:
+            bu = table.copy()
+
     # Filter by implied month
     mn = implied.get('month')
     if 'month' in table.columns and mn is not None:
@@ -104,9 +113,9 @@ def solve_date_simple(g, implied, phrase_dic=phrase_dic_en, tpq=DEFAULT_TPQ, taq
         'month': None,
         'intercalary': None
     })
-    
+
     # Update implied ID lists if we have unique matches
-    imp_ls = ['dyn_id', 'ruler_id', 'era_id']
+    imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']
     for i in imp_ls:
         if i in df.columns:
             unique_vals = df.dropna(subset=[i])[i].unique()
@@ -295,9 +304,9 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
             temp = df[(df['ind_year'] >= tpq) & (df['ind_year'] <= taq)].copy()
             if not temp.empty:
                 df = temp
-        
+
         # Update implied ID lists
-        imp_ls = ['dyn_id', 'ruler_id', 'era_id']
+        imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']
         for i in imp_ls:
             if i in df.columns:
                 unique_vals = df.dropna(subset=[i])[i].unique()
@@ -398,7 +407,6 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
     # Merge lunar table with candidate dataframe
     g = g.merge(lunar_filtered, how='left', on=['cal_stream', 'ind_year'])
     df = g.copy()
-    # Filter by month if specified and not intercalary
     # For intercalary months, we already filtered lunar table to intercalary entries,
     # so accept them regardless of month matching
     if len(months) > 0 and intercalary != 1:
@@ -630,8 +638,8 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         month_vals = df['month'].dropna().unique()
         if len(month_vals) == 1:
             updated_implied['month'] = int(month_vals[0])
-    
-    imp_ls = ['dyn_id', 'ruler_id', 'era_id']
+
+    imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']
     for i in imp_ls:
         if i in df.columns:
             unique_vals = df.dropna(subset=[i])[i].unique()
