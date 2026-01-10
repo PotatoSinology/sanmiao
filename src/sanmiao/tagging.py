@@ -16,15 +16,15 @@ SKIP_ALL = {"date","year","month","day","gz","sexYear","era","ruler","dyn","suff
 
 SKIP_TEXT_ONLY = {"pb", "meta"}
 
-YEAR_RE   = re.compile(r"((?:[一二三四五六七八九十]+|元)[年載])")
+YEAR_RE   = re.compile(r"((?:[一二三四五六七八九十]+|十有[一二三四五六七八九]|元)[年載])")
 # "廿<date><year>" fix disappears because we won't create that broken boundary in text mode.
 
 # Months: order matters (more specific first)
 LEAPMONTH_RE1 = re.compile(r"閏月")
-LEAPMONTH_RE2 = re.compile(r"閏((?:十有[一二]|正)月)")
-LEAPMONTH_RE3 = re.compile(r"閏((?:[一二三四五六七八九十]+|正)月)")
+LEAPMONTH_RE2 = re.compile(r"閏((?:十[一二]|十有[一二]|正)月)")
+LEAPMONTH_RE3 = re.compile(r"閏((?:[一二三四五六七八九十]|正|臘)月)")
 MONTH_RE1     = re.compile(r"((?:十有[一二]|正)月)")
-MONTH_RE2     = re.compile(r"((?:[一二三四五六七八九十]+|正)月)")
+MONTH_RE2     = re.compile(r"((?<![\u4e00-\u9fff])(?:[一二三四五六七八九十]|正|臘)月)")
 
 DAY_RE    = re.compile(r"(([廿卅卌卄丗一二三四五六七八九十]+)日)")
 GZ_RE     = re.compile(r"([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
@@ -213,13 +213,17 @@ def tag_basic_tokens(xml_root):
 
 def promote_gz_to_sexyear(xml_root):
     """
-    Promote sexagenary day (gz) elements to sexagenary year (sexYear) when preceded by year markers.
+    Promote sexagenary day (gz) elements to sexagenary year (sexYear) when preceded by year markers,
+    when preceded by a date element containing an era, or when appearing after an era within the same date.
 
     :param xml_root: et.Element, root of XML tree to process
     :return: et.Element, modified XML root
     """
     for d in xml_root.xpath(".//date[gz]"):
         prev = d.getprevious()
+        has_year_marker = False
+        filler_text = ""
+
         if prev is None:
             s = d.getparent().text or ""
             loc = ("parent", d.getparent())
@@ -228,25 +232,58 @@ def promote_gz_to_sexyear(xml_root):
             loc = ("tail", prev)
 
         m = SEX_YEAR_PREFIX_RE.search(s)
-        if not m:
-            continue
+        if m:
+            has_year_marker = True
+            filler_text = m.group(1)
+            # Remove prefix text
+            new_s = s[:m.start()]
+            if loc[0] == "parent":
+                loc[1].text = new_s
+            else:
+                loc[1].tail = new_s
+        elif prev is not None and prev.tag == "date" and prev.find("era") is not None:
+            # Previous sibling is a date element containing an era
+            has_year_marker = True
+            filler_text = ""  # No filler text needed for era case
 
-        # Remove prefix text
-        new_s = s[:m.start()]
-        if loc[0] == "parent":
-            loc[1].text = new_s
-        else:
-            loc[1].tail = new_s
+        if not has_year_marker:
+            # Check if gz appears after era within the same date element
+            gz_elem = d.find("gz")
+            if gz_elem is not None:
+                # Find all elements before gz in this date
+                elements_before_gz = []
+                for child in d:
+                    if child == gz_elem:
+                        break
+                    elements_before_gz.append(child)
+
+                # Check if any preceding element is an era
+                for elem in elements_before_gz:
+                    if elem.tag == "era":
+                        has_year_marker = True
+                        filler_text = ""  # No filler text needed for era case
+                        break
+
+        if not has_year_marker:
+            continue
 
         gz_text = d.findtext("gz")
 
-        # Rewrite date contents
-        for ch in list(d):
-            d.remove(ch)
-        f = et.SubElement(d, "filler")
-        f.text = m.group(1)
-        sy = et.SubElement(d, "sexYear")
-        sy.text = gz_text
+        # Find the gz element and replace it with sexYear
+        gz_elem = d.find("gz")
+        if gz_elem is not None:
+            # Create sexYear element to replace gz
+            sy = et.Element("sexYear")
+            sy.text = gz_text
+
+            # Replace gz with sexYear
+            d.replace(gz_elem, sy)
+
+            # Add filler before sexYear if needed
+            if filler_text:
+                f = et.Element("filler")
+                f.text = filler_text
+                d.insert(d.index(sy), f)
 
     return xml_root
 
@@ -414,8 +451,6 @@ def tag_date_elements(text, civ=None):
     xml_root = tag_basic_tokens(xml_root)
     # Lunar phases
     replace_in_text_and_tail(xml_root, LP_RE, make_simple_date("lp"), skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
-    # Sexagenary year
-    xml_root = promote_gz_to_sexyear(xml_root)
     # NM date
     xml_root = promote_nmdgz(xml_root)
     # Era names ########################################################################################################
@@ -462,7 +497,10 @@ def tag_date_elements(text, civ=None):
             return d
 
         replace_in_text_and_tail(xml_root, dyn_pattern, make_dyn, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
-    
+
+    # Sexagenary year promotion (must happen after era/ruler/dynasty tagging)
+    xml_root = promote_gz_to_sexyear(xml_root)
+
     # Suffixes #########################################################################################################
     xml_root = attach_suffixes(xml_root)
     # Clean nested tags ################################################################################################
@@ -495,11 +533,13 @@ def consolidate_date(text):
         ('dyn', 'ruler'),
         ('ruler', 'year'), ('ruler', 'era'),
         ('era', 'year'),
+        ('era', 'sexYear'),
         ('era', 'filler'),
         ('ruler', 'filler'),
         ('dyn', 'filler'),
         ('year', 'season'),
         ('year', 'filler'),
+        ('sexYear', 'season'),
         ('sexYear', 'int'),
         ('sexYear', 'month'),
         ('year', 'int'),

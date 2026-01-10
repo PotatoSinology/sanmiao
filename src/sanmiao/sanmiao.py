@@ -99,7 +99,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
 
                 # Remove lone tags
                 xml_root = remove_lone_tags(xml_string)
-
+                
                 # Remove non-date text
                 xml_root = strip_text(xml_root)
 

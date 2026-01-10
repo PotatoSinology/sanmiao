@@ -54,22 +54,20 @@ def remove_lone_tags(xml_string: str) -> et._Element:
         # Return a dummy element if parsing fails
         return et.Element("root")
 
-    # Find and remove lone date tags
-    for date_elem in xml_root.xpath('.//date'):
-        has_content = False
-
-        # Check if date has meaningful child elements or text
-        for child in date_elem:
-            if child.tag in ['year', 'month', 'day', 'gz', 'lp', 'sexYear', 'era', 'dyn', 'ruler']:
-                has_content = True
-                break
-
-        # Remove if no meaningful content
-        if not has_content:
-            parent = date_elem.getparent()
-            if parent is not None:
-                parent.remove(date_elem)
-
+    for node in xml_root.xpath('.//date'):
+        # Single character dates
+        s = len(node.xpath('string()'))
+        if s == 1:
+            node.tag = 'to_remove'
+        # Dynasty, emperor, or era without anything else
+        tags = [sn.tag for sn in node.xpath('./*')]
+        if len(tags) == 1 and tags[0] in ('dyn', 'ruler', 'era'):
+            for child in node:
+                child.tag = 'to_remove'
+            node.tag = 'to_remove'
+    
+    et.strip_tags(xml_root, 'to_remove')    
+    
     return xml_root
 
 
@@ -85,6 +83,7 @@ def strip_text(xml_root: et._Element) -> et._Element:
     for date in xml_root.findall(".//date"):
         date.tail = None
         new_root.append(date)
+
     return new_root
 
 

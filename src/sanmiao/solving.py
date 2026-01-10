@@ -74,7 +74,7 @@ def preference_filtering_bulk(table, implied):
                 bu = table.copy()
     
     table = table.drop_duplicates()
-    return table
+    return table.copy()
 
 
 def solve_date_simple(g, implied, phrase_dic=phrase_dic_en, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ):
