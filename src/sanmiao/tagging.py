@@ -486,8 +486,8 @@ def consolidate_date(text):
     :param text: str (XML)
     :return: str (XML)
     """
-    bu = text
     # Remove spaces
+    bu = text
     xml_root = et.ElementTree(et.fromstring(text)).getroot()
     xml_root = strip_ws_in_text_nodes(xml_root)
     text = et.tostring(xml_root, encoding='utf8').decode('utf8')
@@ -525,10 +525,11 @@ def consolidate_date(text):
             text = clean_attributes(text)
     # Parse to XML
     try:
-        et.ElementTree(et.fromstring(text)).getroot()
-        return text
+        xml_root = et.ElementTree(et.fromstring(text)).getroot()
+        return xml_root
     except et.ParseError:
-        return bu
+        xml_root = et.Element("root")
+        return xml_root
 
 
 def clean_nested_tags(text):
