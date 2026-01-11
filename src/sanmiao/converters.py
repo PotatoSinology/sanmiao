@@ -76,18 +76,22 @@ def ganshu(gz_in, en=False):
         # Normalise for Chen dynasty taboo
         if not en:
             s = re.sub('景', '丙', s)
-            return to_num.get(s, "ERROR")
+            return to_num.get(s, None)
         else:
             s = s.lower()
-            return to_num.get(s, "ERROR")
+        out = to_num.get(s, None)
+        if out is None:
+            raise ValueError(f"Invalid ganzhi string: {gz_in}")
+        return out
 
     # number -> string
     try:
         n = int(gz_in)
     except (TypeError, ValueError):
-        return "ERROR"
+        raise ValueError(f"Invalid ganzhi string: {gz_in}")
+        return None
 
-    return to_str.get(n, "ERROR")
+    return to_str.get(n, None)
 
 
 def numcon(x):
@@ -129,10 +133,13 @@ def numcon(x):
             # Logic tree
             if count == 0:  # If there are no place values
                 # Try to return as integer
-                try:
-                    frankenstein = int(frankenstein)
-                finally:
-                    return frankenstein
+                if frankenstein.strip():  # Only try to convert non-empty strings
+                    try:
+                        return int(frankenstein)
+                    except (ValueError, TypeError):
+                        return None
+                else:
+                    return None
             else:  # If there are place value words
                 # Remove zeros
                 frankenstein = frankenstein.replace('0', '')
