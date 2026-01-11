@@ -868,7 +868,6 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
         no_year = not (has_year or has_sex_year)
         no_month = not (has_month or has_intercalary)
         no_day = not (has_day or has_gz or has_lp)
-        
         if sequential:
             if no_year:  # No year but some sort of day
                 if not no_month or not no_day:
@@ -912,7 +911,7 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                     g, implied, era_df, phrase_dic, tpq, taq,
                     has_month, has_day, has_gz, has_lp
                 )
-
+            g.to_csv('g.csv')
             # Apply lunar constraints to the candidates (whether year was solved or not)
             month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
             day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
