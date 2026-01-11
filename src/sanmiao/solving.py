@@ -160,9 +160,12 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
     """
     if g.empty:
         return pd.DataFrame(), "", implied.copy()
-    
+
     df = g.copy()
-    
+
+    # Initialize updated_implied to avoid UnboundLocalError
+    updated_implied = implied.copy()
+
     # Get year value from candidates (should be same for all rows in group)
     year = None
     if 'year' in df.columns:
