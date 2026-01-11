@@ -90,7 +90,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Reset implied state for each date in non-sequential mode
                 if not sequential:
                     implied = None
-
+                
                 # Convert string to XML, tag all date elements
                 xml_string = tag_date_elements(item, civ=civ)
                 
@@ -124,7 +124,8 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
 
                 # Generate report from dataframe
                 report = generate_report_from_dataframe(output_df, phrase_dic, jd_out)
-
+            else:
+                continue
             output_string += report + '\n\n'
 
     return output_string

@@ -114,7 +114,7 @@ def solve_date_simple(g, implied, phrase_dic=phrase_dic_en, tpq=DEFAULT_TPQ, taq
         'intercalary': None
     })
 
-    # Update implied ID lists if we have unique matches
+    # Update implied ID lists with all unique values found
     imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']
     for i in imp_ls:
         if i in df.columns:
@@ -406,10 +406,19 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         'month': 'lunar_month',
         'intercalary': 'lunar_intercalary'
     })
-
+    
     # Merge lunar table with candidate dataframe
     g = g.merge(lunar_filtered, how='left', on=['cal_stream', 'ind_year'])
     df = g.copy()
+    
+    # Drop years that did not match (if filtered for intercalary month, for example)
+    df = df.dropna(subset=['lunar_month'])
+    if df.empty:
+        df = g.copy()
+        if 'error_str' not in df.columns:
+            df['error_str'] = ""
+        df['error_str'] += phrase_dic.get('year-month-mismatch', 'year-month mismatch; ')
+    
     # For intercalary months, we already filtered lunar table to intercalary entries,
     # so accept them regardless of month matching
     if len(months) > 0 and intercalary != 1:
@@ -435,7 +444,14 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
                     if 'error_str' not in df.columns:
                         df['error_str'] = ""
                     df['error_str'] += phrase_dic.get('year-month-mismatch', 'year-month mismatch; ')
-                    
+    elif len(months) > 0 and intercalary == 1:  # If we have month month and intercalary
+        df = df[(df['month'] == df['lunar_month']) & (df['intercalary'] == df['lunar_intercalary'])].copy()
+        if df.empty:
+            df = g.copy()
+            df = df[df['month'] == df['lunar_month']].copy()
+            if 'error_str' not in df.columns:
+                df['error_str'] = ""
+            df['error_str'] += phrase_dic.get('year-int-month-mismatch', 'Year-int. month mismatch; ')
     else:  # If no month constraint but intercalary
         # Fetch month from lunar table
         # Note: this should be fine, because we have matched on cal_stream and ind_year,
@@ -446,7 +462,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             if 'error_str' not in df.columns:
                 df['error_str'] = ""
             df['error_str'] += phrase_dic.get('year-int-month-mismatch', 'Year-int. month mismatch; ')
-            
+    
     # Handle stop_at_month case (month only, no day/gz/lp)
     if stop_at_month:
         df = preference_filtering_bulk(df, updated_implied)
@@ -458,6 +474,19 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
                 df['start_gz'] = df['nmd_gz'].apply(lambda g: ganshu(g))
                 df['end_gz'] = df.apply(lambda row: ganshu((row['nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
         
+        # Update implied state
+        if 'month' in df.columns:
+            month_vals = df['month'].dropna().unique()
+            if len(month_vals) == 1:
+                updated_implied['month'] = int(month_vals[0])
+
+        imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']
+        for i in imp_ls:
+            if i in df.columns:
+                unique_vals = df.dropna(subset=[i])[i].unique()
+                if len(unique_vals) == 1:
+                    updated_implied.update({f'{i}_ls': list(unique_vals)})
+                    
         return df, updated_implied
 
     # Handle combinations of day/gz/lp constraints
