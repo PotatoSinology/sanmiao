@@ -847,13 +847,25 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
     
     all_results = []
     
+    # Track all date_index values from original df to ensure none are lost
+    all_date_indices = sorted(df['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
+    
     # Group by date_index and process sequentially [sex_year is fine at this point]
-    for date_idx in sorted(df_candidates['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0):
+    for date_idx in all_date_indices:
         # Reset implied state for each date if not sequential
 
         g = df_candidates[df_candidates['date_index'] == date_idx].copy()
         if g.empty:
-            continue
+            # If no candidates were generated, create a fallback row from original df TODO verify this
+            original_rows = df[df['date_index'] == date_idx]
+            if not original_rows.empty:
+                g = original_rows.iloc[[0]].copy()
+                if 'error_str' not in g.columns:
+                    g['error_str'] = ""
+                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                g['error_str'] += phrase_dic.get('no-candidates', 'No candidates generated; ')
+            else:
+                continue
         
         # Determine what constraints this date has
         has_year = g['year'].notna().any()
@@ -868,6 +880,7 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
         no_year = not (has_year or has_sex_year)
         no_month = not (has_month or has_intercalary)
         no_day = not (has_day or has_gz or has_lp)
+        
         if sequential:
             if no_year:  # No year but some sort of day
                 if not no_month or not no_day:
@@ -888,7 +901,7 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                         g['sex_year'] = implied['sex_year']
                     has_year = True
                 # If there is no month, pick that up
-                if no_month:
+                if no_month and not no_day:
                     if implied.get('month') is not None and ('month' not in g.columns or g['month'].isna().all()):
                         g['month'] = implied['month']
                     if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
@@ -911,7 +924,7 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                     g, implied, era_df, phrase_dic, tpq, taq,
                     has_month, has_day, has_gz, has_lp
                 )
-            g.to_csv('g.csv')
+
             # Apply lunar constraints to the candidates (whether year was solved or not)
             month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
             day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
@@ -925,13 +938,11 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                 tpq=tpq, taq=taq, pg=pg, gs=gs
             )
             # If lunar constraints resulted in no matches (likely due to corruption),
-            # return the original input dataframe instead of empty
+            # use the original input dataframe instead of empty
             if result_df.empty:
                 result_df = g.copy()
                 phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
                 result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
-                xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
-                return xml_string, result_df, implied
 
             # Add metadata to result_df if not empty
             if not result_df.empty:
@@ -950,10 +961,30 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                 result_df['error_str'] += phrase_dic.get('year-solving-failed', 'Year resolution failed; ')
 
         # Add date_index and date_string to result
+        # Ensure we always include the date, even if solving failed
+        if result_df.empty:
+            # If solving completely failed, create a fallback row from original candidates
+            result_df = g.iloc[[0]].copy() if not g.empty else pd.DataFrame()
+            if not result_df.empty:
+                if 'error_str' not in result_df.columns:
+                    result_df['error_str'] = ""
+                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                result_df['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
+        
         if not result_df.empty:
             result_df['date_index'] = date_idx
             result_df['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
             all_results.append(result_df)
+        elif not g.empty:
+            # Last resort: create a minimal row from the first candidate to ensure date is not lost
+            fallback_row = g.iloc[[0]].copy()
+            fallback_row['date_index'] = date_idx
+            fallback_row['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
+            if 'error_str' not in fallback_row.columns:
+                fallback_row['error_str'] = ""
+            phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+            fallback_row['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
+            all_results.append(fallback_row)
     
     # Combine all results
     if all_results:
