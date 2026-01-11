@@ -127,5 +127,5 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
             else:
                 continue
             output_string += report + '\n\n'
-
+    
     return output_string
