@@ -414,6 +414,8 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
     })
 
     # Merge lunar table with candidate dataframe
+    cols = [col for col in g.columns if col not in lunar_filtered.columns] + ['cal_stream', 'ind_year']
+    g = g[cols]
     g = g.merge(lunar_filtered, how='left', on=['cal_stream', 'ind_year'])
     df = g.copy()
     # For intercalary months, we already filtered lunar table to intercalary entries,
@@ -445,7 +447,8 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         df = df[(df['month'] == df['lunar_month']) & (df['intercalary'] == df['lunar_intercalary'])].copy()
         if df.empty:
             df = g.copy()
-            df = df[df['month'] == df['lunar_month']].copy()
+            if not df[df['month'] == df['lunar_month']].empty:
+                df = df[df['month'] == df['lunar_month']].copy()
             if 'error_str' not in df.columns:
                 df['error_str'] = ""
             df['error_str'] += phrase_dic.get('year-int-month-mismatch', 'Year-int. month mismatch; ')
@@ -459,7 +462,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             if 'error_str' not in df.columns:
                 df['error_str'] = ""
             df['error_str'] += phrase_dic.get('year-int-month-mismatch', 'Year-int. month mismatch; ')
-            
+    
     # Handle stop_at_month case (month only, no day/gz/lp)
     if stop_at_month:
         df = preference_filtering_bulk(df, updated_implied)
@@ -469,6 +472,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             df['ISO_Date_End'] = df['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             if 'nmd_gz' in df.columns:
                 df['start_gz'] = df['nmd_gz'].apply(lambda g: ganshu(g))
+                # Remove duplicate columns before apply
                 df['end_gz'] = df.apply(lambda row: ganshu((row['nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
         
         return df, updated_implied

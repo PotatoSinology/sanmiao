@@ -444,7 +444,6 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 'source_row': row
             })
         
-        
         # Skip if ALL IDs are None (no identifiers specified)
         # Don't generate candidates for every possible era
         all_none = all(
@@ -453,7 +452,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             combo['era_id'] is None
             for combo in resolved_combinations
         )
-    
+        
         if all_none:
             if not proliferate:
                 first_row = date_rows.iloc[0]
@@ -742,6 +741,13 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     cols = [i for i in cols if i in candidates_df.columns]
     candidates_df = candidates_df.drop(columns=cols)
     
+    # Stop-gap for problem I don't understand
+    bu = candidates_df.copy()
+    if 'dyn_id' in candidates_df.columns:
+        candidates_df = candidates_df.dropna(subset=['dyn_id'])
+        if candidates_df.empty:
+            candidates_df = bu.copy()
+    
     return candidates_df.drop_duplicates().reset_index(drop=True)
 
 
@@ -838,10 +844,10 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
     df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
     df = bulk_resolve_ruler_ids(df, ruler_tag_df)
     df = bulk_resolve_era_ids(df, era_df)
-    
+
     # Step 5: Bulk generate candidates (Phase 2) 
     df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
-    
+
     # Add report note
     df_candidates['error_str'] = ""
     
