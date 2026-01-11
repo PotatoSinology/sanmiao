@@ -16,7 +16,7 @@ SKIP_ALL = {"date","year","month","day","gz","sexYear","era","ruler","dyn","suff
 
 SKIP_TEXT_ONLY = {"pb", "meta"}
 
-YEAR_RE   = re.compile(r"((?:[一二三四五六七八九十]+|十有[一二三四五六七八九]|元)[年載])")
+YEAR_RE   = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九十]+|十有[一二三四五六七八九]|元)[年載])")
 # "廿<date><year>" fix disappears because we won't create that broken boundary in text mode.
 
 # Months: order matters (more specific first)
@@ -24,11 +24,11 @@ LEAPMONTH_RE1 = re.compile(r"閏月")
 LEAPMONTH_RE2 = re.compile(r"閏((?:十[一二]|十有[一二]|正)月)")
 LEAPMONTH_RE3 = re.compile(r"閏((?:[一二三四五六七八九十]|正|臘)月)")
 MONTH_RE1     = re.compile(r"((?:十有[一二]|十[一二]|正)月)")
-MONTH_RE2     = re.compile(r"((?<![\u4e00-\u9fff])(?:[一二三四五六七八九十]|正|臘)月)")
+MONTH_RE2     = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九十]|正|臘)月)")
 
-DAY_RE    = re.compile(r"(([廿卅卌卄丗一二三四五六七八九十]+)日)")
+DAY_RE    = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九]|[一二]*十[一二三四五六七八九]*|[廿卄][一二三四五六七八九]*|卅|丗|三十)日)")
 GZ_RE     = re.compile(r"([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
-SEXYEAR_RE = re.compile(r"([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])(年|歲)")
+SEXYEAR_RE = re.compile(r"(([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]))(年|歲)")
 SEASON_RE = re.compile(r"([春秋冬夏])")
 
 LP_RE = re.compile(r"([朔晦])")
@@ -153,7 +153,7 @@ def make_sexyear(m):
     sy = et.SubElement(d, "sexYear")
     sy.text = m.group(1)  # sexagenary part (甲子 etc.)
     filler = et.SubElement(sy, "filler")
-    filler.text = m.group(2)  # suffix (年 or 歲)
+    filler.text = m.group(3)  # suffix (年 or 歲)
     return d
 
 def make_leap_month_exact_monthtext(month_text: str):

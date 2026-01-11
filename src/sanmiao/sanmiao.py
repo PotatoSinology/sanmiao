@@ -93,7 +93,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
 
                 # Convert string to XML, tag all date elements
                 xml_string = tag_date_elements(item, civ=civ)
-
+                
                 # Consolidate adjacent date elements
                 xml_string = consolidate_date(xml_string)
                 
