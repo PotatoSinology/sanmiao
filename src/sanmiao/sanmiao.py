@@ -17,7 +17,7 @@ from .config import (
 from .xml_utils import remove_lone_tags, strip_text
 from .reporting import jdn_to_ccs, jy_to_ccs, generate_report_from_dataframe
 from .tagging import tag_date_elements, consolidate_date, index_date_nodes
-from .bulk_processing import extract_date_table_bulk, add_can_names_bulk
+from .bulk_processing import extract_date_table_bulk, add_can_names_bulk, dates_xml_to_df
 
 def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True):
     """
@@ -51,7 +51,18 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
     ui = re.sub(r'[,;]', r'\n', ui)
     items = re.split(r'\n', ui)
     output_string = ''
-    implied = None
+    
+    # Initialize implied state (moved from extract_date_table_bulk)
+    implied = {
+        'cal_stream_ls': [],
+        'dyn_id_ls': [],
+        'ruler_id_ls': [],
+        'era_id_ls': [],
+        'year': None,
+        'month': None,
+        'intercalary': None,
+        'sex_year': None
+    }
     
     for item in items:
         if item != '':
@@ -89,7 +100,16 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
             elif is_ccs:
                 # Reset implied state for each date in non-sequential mode
                 if not sequential:
-                    implied = None
+                    implied = {
+                        'cal_stream_ls': [],
+                        'dyn_id_ls': [],
+                        'ruler_id_ls': [],
+                        'era_id_ls': [],
+                        'year': None,
+                        'month': None,
+                        'intercalary': None,
+                        'sex_year': None
+                    }
                 
                 # Convert string to XML, tag all date elements
                 xml_string = tag_date_elements(item, civ=civ)
@@ -109,9 +129,12 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Load calendar tables
                 tables = prepare_tables(civ=civ)
                 
+                # Extract date table from XML (moved from extract_date_table_bulk)
+                df = dates_xml_to_df(xml_root, attributes=False)
+                
                 # Extract dates using optimized bulk function
                 xml_string, output_df, implied = extract_date_table_bulk(
-                    xml_root, implied=implied, pg=pg, gs=gs, lang=lang,
+                    xml_root, df=df, implied=implied, pg=pg, gs=gs, lang=lang,
                     tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
                 )
 
