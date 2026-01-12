@@ -14,6 +14,160 @@ from .solving import (
     solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints
 )
 
+# Helper functions to reduce redundancy
+
+def prioritize_resolved_values(df):
+    """
+    Helper function to prioritize attributes over resolved values in DataFrame.
+    
+    When resolving string identifiers to IDs, this function ensures that explicit
+    attributes (set in the original data) take precedence over values resolved
+    from string matching.
+    
+    :param df: DataFrame with columns ending in '_resolved' that need to be merged
+    :return: DataFrame with resolved values copied to base columns only where attributes don't exist
+    """
+    resolved_cols = [col for col in df.columns if col.endswith('_resolved')]
+    if resolved_cols:
+        for resolved_col in resolved_cols:
+            base_col = resolved_col.replace('_resolved', '')
+            # Only copy resolved values where base column is NaN (no explicit attribute set)
+            if base_col in df.columns:
+                mask_no_attr = df[base_col].isna()
+                mask_resolved = df[resolved_col].notna()
+                mask_to_copy = mask_no_attr & mask_resolved
+            else:
+                # Base column doesn't exist, copy all resolved values
+                mask_to_copy = df[resolved_col].notna()
+            
+            if mask_to_copy.any():
+                df.loc[mask_to_copy, base_col] = df.loc[mask_to_copy, resolved_col]
+            # Drop the resolved column
+            df = df.drop(columns=[resolved_col])
+    return df
+
+
+def check_explicit_attribute(row_before_resolution, attr_name):
+    """
+    Check if an attribute existed as an explicit value before string resolution.
+    
+    :param row_before_resolution: Series representing a row before resolution
+    :param attr_name: str, name of the attribute to check (e.g., 'era_id', 'dyn_id')
+    :return: tuple (bool, value) - (has_explicit_attr, attr_value)
+    """
+    if attr_name in row_before_resolution and pd.notna(row_before_resolution.get(attr_name)):
+        return True, row_before_resolution[attr_name]
+    return False, None
+
+
+def reset_implied_state_for_era(implied, era_id, era_df):
+    """
+    Reset implied state to match a specific era's context.
+    
+    :param implied: dict, current implied state
+    :param era_id: int, era_id to reset to
+    :param era_df: DataFrame, era table
+    :return: None (modifies implied in place)
+    """
+    era_info = era_df[era_df['era_id'] == era_id]
+    if not era_info.empty:
+        era_row = era_info.iloc[0]
+        if pd.notna(era_row.get('cal_stream')):
+            implied['cal_stream_ls'] = [era_row['cal_stream']]
+        if pd.notna(era_row.get('dyn_id')):
+            implied['dyn_id_ls'] = [era_row['dyn_id']]
+        if pd.notna(era_row.get('ruler_id')):
+            implied['ruler_id_ls'] = [era_row['ruler_id']]
+        implied['era_id_ls'] = [era_id]
+        # Reset year/month when era changes (new context)
+        implied['year'] = None
+        implied['month'] = None
+        implied['intercalary'] = None
+
+
+def reset_implied_state_for_ruler(implied, ruler_id, ruler_df):
+    """
+    Reset implied state to match a specific ruler's context.
+    
+    :param implied: dict, current implied state
+    :param ruler_id: int, ruler_id to reset to
+    :param ruler_df: DataFrame, ruler table
+    :return: None (modifies implied in place)
+    """
+    ruler_info = ruler_df[ruler_df['person_id'] == ruler_id]
+    if not ruler_info.empty:
+        ruler_row = ruler_info.iloc[0]
+        if 'cal_stream' in ruler_df.columns and pd.notna(ruler_row.get('cal_stream')):
+            implied['cal_stream_ls'] = [ruler_row['cal_stream']]
+        if pd.notna(ruler_row.get('dyn_id')):
+            implied['dyn_id_ls'] = [ruler_row['dyn_id']]
+        implied['ruler_id_ls'] = [ruler_id]
+        # Clear era (ruler is less specific than era)
+        implied['era_id_ls'] = []
+        # Reset year/month when ruler changes (new context)
+        implied['year'] = None
+        implied['month'] = None
+        implied['intercalary'] = None
+
+
+def reset_implied_state_for_dynasty(implied, dyn_id, dyn_df):
+    """
+    Reset implied state to match a specific dynasty's context.
+    
+    :param implied: dict, current implied state
+    :param dyn_id: int, dyn_id to reset to
+    :param dyn_df: DataFrame, dynasty table
+    :return: None (modifies implied in place)
+    """
+    dyn_info = dyn_df[dyn_df['dyn_id'] == dyn_id]
+    if not dyn_info.empty:
+        dyn_row = dyn_info.iloc[0]
+        if 'cal_stream' in dyn_df.columns and pd.notna(dyn_row.get('cal_stream')):
+            implied['cal_stream_ls'] = [dyn_row['cal_stream']]
+        implied['dyn_id_ls'] = [dyn_id]
+        # Clear ruler and era (dynasty is less specific)
+        implied['ruler_id_ls'] = []
+        implied['era_id_ls'] = []
+        # Reset year/month when dynasty changes (new context)
+        implied['year'] = None
+        implied['month'] = None
+        implied['intercalary'] = None
+
+
+def clear_preliminary_errors(result_df):
+    """
+    Clear preliminary error messages from successfully resolved dates.
+    
+    Removes "No candidates generated" and "Year out of bounds" errors when
+    a date has been successfully resolved (has ind_year and context).
+    
+    :param result_df: DataFrame with solved date results
+    :return: DataFrame with cleaned error strings
+    """
+    # Check if date was successfully resolved
+    is_resolved = (
+        'ind_year' in result_df.columns and result_df['ind_year'].notna().any() and
+        (('era_id' in result_df.columns and result_df['era_id'].notna().any()) or
+         ('dyn_id' in result_df.columns and result_df['dyn_id'].notna().any()) or
+         ('ruler_id' in result_df.columns and result_df['ruler_id'].notna().any()))
+    )
+    
+    if is_resolved and 'error_str' in result_df.columns:
+        # Remove "No candidates generated" and "Year out of bounds" if date was resolved
+        result_df['error_str'] = result_df['error_str'].str.replace(
+            r'No candidates generated;?\s*', '', regex=True
+        )
+        result_df['error_str'] = result_df['error_str'].str.replace(
+            r'Year out of bounds;?\s*', '', regex=True
+        )
+        # Clean up any double semicolons or trailing spaces
+        result_df['error_str'] = result_df['error_str'].str.replace(r';\s*;', ';', regex=True).str.strip()
+        # If error_str is now empty or just whitespace, set to empty string
+        result_df.loc[result_df['error_str'].str.strip() == '', 'error_str'] = ''
+    
+    return result_df
+
+
 def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None):
     """
     Extract date table from XML string using optimized bulk processing.
@@ -43,11 +197,16 @@ def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ
     )
 
 
-def dates_xml_to_df(xml_root: str) -> pd.DataFrame:
+def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
     """
     Convert XML string with date elements to pandas DataFrame.
 
-    :param xml_string: str, XML string containing date elements
+    :param xml_root: ElementTree element, XML root containing date elements
+    :param attributes: bool, if True, extract both attributes and child elements from <date> elements.
+                       Attributes take precedence during normalization when both are present.
+                       If False, extract only child elements (default behavior).
+                       Attributes extracted: cal_stream, dyn_id, ruler_id, era_id, ind_year, year, 
+                       sex_year, month, intercalary, day, gz, nmd_gz, lp
     :return: pd.DataFrame, DataFrame with extracted date information
     """
     # Handle namespaces - check if root has a default namespace
@@ -61,13 +220,18 @@ def dates_xml_to_df(xml_root: str) -> pd.DataFrame:
     # Use namespace-aware XPath
     date_xpath = './/tei:date' if ns else './/date'
     for node in xml_root.xpath(date_xpath, namespaces=ns):
+        # Always extract date_index and date_string
+        row = {
+            "date_index": node.attrib.get("index"),
+            "date_string": node.xpath("normalize-space(string())", namespaces=ns) if node.xpath("normalize-space(string())", namespaces=ns) else "",
+        }
+        
+        # Extract child elements (always done, as fallback for incomplete attributes)
         def get1(xp):
             result = node.xpath(f'normalize-space(string({xp}))', namespaces=ns)
             return result if result and result.strip() else None
 
-        row = {
-            "date_index": node.attrib.get("index"),
-            "date_string": node.xpath("normalize-space(string())", namespaces=ns) if node.xpath("normalize-space(string())", namespaces=ns) else "",
+        row.update({
             "dyn_str": get1(".//tei:dyn" if ns else ".//dyn"),
             "ruler_str": get1(".//tei:ruler" if ns else ".//ruler"),
             "era_str": get1(".//tei:era" if ns else ".//era"),
@@ -78,34 +242,53 @@ def dates_xml_to_df(xml_root: str) -> pd.DataFrame:
             "gz_str": get1(".//tei:gz" if ns else ".//gz"),
             "lp_str": get1(".//tei:lp" if ns else ".//lp"),
             "has_int": 1 if node.xpath(".//tei:int" if ns else ".//int", namespaces=ns) else 0,
-        }
+        })
 
-        # Build present_elements string using hreys mildg coding
+        # If attributes=True, also extract attributes from <date> element
+        # Attributes will take precedence over child elements during normalization
+        if attributes:
+            attr_names = [
+                'cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'ind_year',
+                'year', 'sex_year', 'month', 'intercalary', 'day', 'gz', 'nmd_gz', 'lp'
+            ]
+            for attr_name in attr_names:
+                attr_value = node.attrib.get(attr_name)
+                if attr_value is not None:
+                    # Convert to appropriate type - all these attributes are numeric (including negative values like lp=-1)
+                    try:
+                        # Try to convert to int (handles strings like "1", "23", "-1", etc.)
+                        row[attr_name] = int(attr_value)
+                    except (ValueError, TypeError):
+                        # If conversion fails, keep as string
+                        row[attr_name] = attr_value
+
+        # Build present_elements string - prioritize attributes if present, otherwise use child elements
         present_elements = ""
-        if row['dyn_str'] and row['dyn_str'].strip():
+        if ('dyn_id' in row and pd.notna(row.get('dyn_id'))) or (row['dyn_str'] and row['dyn_str'].strip()):
             present_elements += "h"
-        if row['ruler_str'] and row['ruler_str'].strip():
+        if ('ruler_id' in row and pd.notna(row.get('ruler_id'))) or (row['ruler_str'] and row['ruler_str'].strip()):
             present_elements += "r"
-        if row['era_str'] and row['era_str'].strip():
+        if ('era_id' in row and pd.notna(row.get('era_id'))) or (row['era_str'] and row['era_str'].strip()):
             present_elements += "e"
-        if row['year_str'] and row['year_str'].strip():
+        if ('year' in row and pd.notna(row.get('year'))) or (row['year_str'] and row['year_str'].strip()):
             present_elements += "y"
-        if row['sexYear_str'] and row['sexYear_str'].strip():
+        if ('sex_year' in row and pd.notna(row.get('sex_year'))) or (row['sexYear_str'] and row['sexYear_str'].strip()):
             present_elements += "s"
-        if row['month_str'] and row['month_str'].strip():
+        if ('month' in row and pd.notna(row.get('month'))) or (row['month_str'] and row['month_str'].strip()):
             present_elements += "m"
-        if row['has_int'] == 1:
+        if ('intercalary' in row and pd.notna(row.get('intercalary'))) or (row['has_int'] == 1):
             present_elements += "i"
-        if row['lp_str'] and row['lp_str'].strip():
+        if ('lp' in row and pd.notna(row.get('lp'))) or (row['lp_str'] and row['lp_str'].strip()):
             present_elements += "l"
-        if row['day_str'] and row['day_str'].strip():
+        if ('day' in row and pd.notna(row.get('day'))) or (row['day_str'] and row['day_str'].strip()):
             present_elements += "d"
-        if row['gz_str'] and row['gz_str'].strip():
+        if ('gz' in row and pd.notna(row.get('gz'))) or (row['gz_str'] and row['gz_str'].strip()):
             present_elements += "g"
         row['present_elements'] = present_elements
 
         if row['sexYear_str'] is not None:
             row['sexYear_str'] = re.sub(r'[歲年]', '', row['sexYear_str'])
+        
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -113,22 +296,45 @@ def dates_xml_to_df(xml_root: str) -> pd.DataFrame:
 def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize and convert string date fields to numeric values in DataFrame.
+    
+    If attribute values already exist (from <date> element attributes), they take precedence
+    over string values extracted from child elements. String processing only occurs for rows
+    where the attribute is missing or NaN.
 
     :param df: pd.DataFrame, DataFrame with string date fields
     :return: pd.DataFrame, DataFrame with normalized numeric date fields
     """
     out = df.copy()
-    # year
-    out["year"] = out["year_str"].where(out["year_str"].notna(), None)
-    out.loc[out["year_str"] == "元年", "year"] = 1
-    m = out["year_str"].notna() & (out["year_str"] != "元年")
-    # Strip 年 character before converting numerals
-    out.loc[m, "year"] = out.loc[m, "year_str"].str.rstrip('年').map(numcon)
-
-    # sexYear
-    out["sex_year"] = out["sexYear_str"].map(lambda s: ganshu(s) if isinstance(s, str) and s else None)
     
-    # month
+    # year - only process string if attribute doesn't exist or is NaN for that row
+    # Initialize year column if it doesn't exist
+    if 'year' not in out.columns:
+        out['year'] = None
+    
+    # Process string only for rows where year attribute is missing/NaN
+    mask_no_attr = out['year'].isna()
+    
+    if 'year_str' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "year"] = out.loc[mask_no_attr, "year_str"].where(
+            out.loc[mask_no_attr, "year_str"].notna(), None
+        )
+        out.loc[mask_no_attr & (out["year_str"] == "元年"), "year"] = 1
+        m = mask_no_attr & out["year_str"].notna() & (out["year_str"] != "元年")
+        # Strip 年 character before converting numerals
+        out.loc[m, "year"] = out.loc[m, "year_str"].str.rstrip('年').map(numcon)
+
+    # sexYear - only process string if attribute doesn't exist or is NaN for that row
+    if 'sex_year' not in out.columns:
+        out['sex_year'] = None
+    
+    mask_no_attr = out['sex_year'].isna()
+    
+    if 'sexYear_str' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "sex_year"] = out.loc[mask_no_attr, "sexYear_str"].map(
+            lambda s: ganshu(s) if isinstance(s, str) and s else None
+        )
+    
+    # month - only process string if attribute doesn't exist or is NaN for that row
     def month_to_int(s):
         if not isinstance(s, str) or not s:
             return None
@@ -137,20 +343,56 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
         if s == "一月": return 14
         # Strip 月 character before converting numerals
         return numcon(s.rstrip('月'))
-    out["month"] = out["month_str"].map(month_to_int)
+    
+    if 'month' not in out.columns:
+        out['month'] = None
+    
+    mask_no_attr = out['month'].isna()
+    
+    if 'month_str' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "month"] = out.loc[mask_no_attr, "month_str"].map(month_to_int)
 
-    # day
-    out["day"] = out["day_str"].map(lambda s: numcon(s.rstrip('日')) if isinstance(s, str) and s else None)
+    # day - only process string if attribute doesn't exist or is NaN for that row
+    if 'day' not in out.columns:
+        out['day'] = None
+    
+    mask_no_attr = out['day'].isna()
+    
+    if 'day_str' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "day"] = out.loc[mask_no_attr, "day_str"].map(
+            lambda s: numcon(s.rstrip('日')) if isinstance(s, str) and s else None
+        )
 
-    # gz (sexagenary day number)
-    out["gz"] = out["gz_str"].map(lambda s: ganshu(s) if isinstance(s, str) and s else None)
+    # gz (sexagenary day number) - only process string if attribute doesn't exist or is NaN for that row
+    if 'gz' not in out.columns:
+        out['gz'] = None
+    
+    mask_no_attr = out['gz'].isna()
+    
+    if 'gz_str' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "gz"] = out.loc[mask_no_attr, "gz_str"].map(
+            lambda s: ganshu(s) if isinstance(s, str) and s else None
+        )
 
-    # lp
-    out["lp"] = out["lp_str"].map(lambda s: LP_DIC.get(s) if isinstance(s, str) else None)
+    # lp - only process string if attribute doesn't exist or is NaN for that row
+    if 'lp' not in out.columns:
+        out['lp'] = None
+    
+    mask_no_attr = out['lp'].isna()
+    
+    if 'lp_str' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "lp"] = out.loc[mask_no_attr, "lp_str"].map(
+            lambda s: LP_DIC.get(s) if isinstance(s, str) else None
+        )
 
-    # intercalary
-    # out["intercalary"] = out["has_int"].replace({0: None, 1: 1})
-    out["intercalary"] = out["has_int"].replace({0: None, 1: 1}).infer_objects(copy=False)
+    # intercalary - only process has_int if attribute doesn't exist or is NaN for that row
+    if 'intercalary' not in out.columns:
+        out['intercalary'] = None
+    
+    mask_no_attr = out['intercalary'].isna()
+    
+    if 'has_int' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "intercalary"] = out.loc[mask_no_attr, "has_int"].replace({0: None, 1: 1}).infer_objects(copy=False)
     
     # Normalize date_string: remove all spaces from Chinese text
     if "date_string" in out.columns:
@@ -260,11 +502,8 @@ def bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df):
         suffixes=('', '_resolved')
     )
     
-    # If we have both original and resolved, keep resolved (drop original if it exists)
-    if 'dyn_id' in out.columns and out['dyn_id'].dtype != 'object':
-        # Keep the resolved one
-        if '_resolved' in str(out.columns):
-            out = out.drop(columns=[col for col in out.columns if col.endswith('_resolved')])
+    # Prioritize attributes over resolved values
+    out = prioritize_resolved_values(out)
     return out
 
 
@@ -313,11 +552,8 @@ def bulk_resolve_ruler_ids(df, ruler_tag_df):
         suffixes=('', '_resolved')
     )
     
-    # If we have both original and resolved, keep resolved (drop original if it exists)
-    if 'ruler_id' in out.columns and out['ruler_id'].dtype != 'object':
-        # Keep the resolved one
-        if '_resolved' in str(out.columns):
-            out = out.drop(columns=[col for col in out.columns if col.endswith('_resolved')])
+    # Prioritize attributes over resolved values
+    out = prioritize_resolved_values(out)
     return out
 
 
@@ -378,11 +614,8 @@ def bulk_resolve_era_ids(df, era_df):
         suffixes=('', '_resolved')
     )
     
-    # If we have both original and resolved, keep resolved (drop original if it exists)
-    if 'era_id' in out.columns and out['era_id'].dtype != 'object':
-        # Keep the resolved one
-        if '_resolved' in str(out.columns):
-            out = out.drop(columns=[col for col in out.columns if col.endswith('_resolved')])
+    # Prioritize attributes over resolved values
+    out = prioritize_resolved_values(out)
     return out
 
 
@@ -617,14 +850,19 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 if not ruler_info.empty:
                     ruler_row = ruler_info.iloc[0]
 
-                    # If dynasty is also specified, check if it matches
-                    if combo['dyn_id'] is not None and ruler_row['dyn_id'] != combo['dyn_id']:
-                        continue  # Dynasty doesn't match, skip this ruler
+                    # When ruler is explicitly specified, its dyn_id is authoritative
+                    # If combo has a conflicting dyn_id (from implied state), trust the ruler's actual dyn_id
+                    if combo['dyn_id'] is not None and pd.notna(ruler_row.get('dyn_id')):
+                        if int(combo['dyn_id']) != int(ruler_row['dyn_id']):
+                            # Conflict: combo's dyn_id doesn't match ruler's actual dynasty
+                            # Trust the ruler's actual dynasty (it's explicitly specified)
+                            # Continue with ruler's dyn_id instead of skipping
+                            pass  # We'll use ruler_row['dyn_id'] below, which is correct
 
                     # Create candidate using ruler's reign period
                     candidate_row = {
                         'date_index': date_idx,
-                        'dyn_id': ruler_row['dyn_id'],
+                        'dyn_id': ruler_row['dyn_id'],  # Use ruler's actual dynasty
                         'ruler_id': combo['ruler_id'],
                         'era_id': None,  # No specific era
                         'cal_stream': ruler_row['cal_stream'],
@@ -646,25 +884,73 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             # Filter by era_id if specified
             if combo['era_id'] is not None:
                 era_filter = era_filter[era_filter['era_id'] == combo['era_id']]
-            
-            # Filter by ruler_id if specified (this enforces that era belongs to this ruler)
-            if combo['ruler_id'] is not None:
-                era_filter = era_filter[era_filter['ruler_id'] == combo['ruler_id']]
-            
-            # Filter by dyn_id if specified (with part_of relationships)
-            if combo['dyn_id'] is not None:
-                # Handle part_of relationships for dynasty
-                matched_dyn_ids = [combo['dyn_id']]
-                if 'part_of' in dyn_df.columns:
-                    # Find dynasties that have this as part_of
-                    part_of_dyns = dyn_df[dyn_df['part_of'] == combo['dyn_id']]['dyn_id'].tolist()
-                    matched_dyn_ids.extend(part_of_dyns)
-                    # Also include the part_of value if it exists
-                    part_of_value = dyn_df[dyn_df['dyn_id'] == combo['dyn_id']]['part_of'].values
-                    if len(part_of_value) > 0 and pd.notna(part_of_value[0]):
-                        matched_dyn_ids.append(part_of_value[0])
-                    matched_dyn_ids = list(set(matched_dyn_ids))  # Remove duplicates
-                era_filter = era_filter[era_filter['dyn_id'].isin(matched_dyn_ids)]
+                
+                # When era_id is explicitly specified, it's authoritative
+                # If the era's actual dyn_id/ruler_id conflicts with combo's values,
+                # trust the era_id and use the era's actual IDs
+                if not era_filter.empty:
+                    era_row = era_filter.iloc[0]
+                    era_actual_dyn_id = era_row.get('dyn_id')
+                    era_actual_ruler_id = era_row.get('ruler_id')
+                    
+                    # If combo has dyn_id/ruler_id that conflicts with era's actual ones,
+                    # don't filter by the conflicting combo values - use era's actual IDs
+                    dyn_conflicts = (combo['dyn_id'] is not None and 
+                                    era_actual_dyn_id is not None and 
+                                    pd.notna(era_actual_dyn_id) and
+                                    int(combo['dyn_id']) != int(era_actual_dyn_id))
+                    ruler_conflicts = (combo['ruler_id'] is not None and 
+                                      era_actual_ruler_id is not None and 
+                                      pd.notna(era_actual_ruler_id) and
+                                      int(combo['ruler_id']) != int(era_actual_ruler_id))
+                    
+                    # Filter by ruler_id only if it matches era's actual ruler_id (or if no conflict)
+                    if combo['ruler_id'] is not None:
+                        if not ruler_conflicts:
+                            era_filter = era_filter[era_filter['ruler_id'] == combo['ruler_id']]
+                        else:
+                            # Conflict - trust era_id, filter by era's actual ruler_id
+                            era_filter = era_filter[era_filter['ruler_id'] == era_actual_ruler_id]
+                    
+                    # Filter by dyn_id only if it matches era's actual dyn_id (or if no conflict)
+                    if combo['dyn_id'] is not None:
+                        if not dyn_conflicts:
+                            # Handle part_of relationships for dynasty
+                            matched_dyn_ids = [combo['dyn_id']]
+                            if 'part_of' in dyn_df.columns:
+                                # Find dynasties that have this as part_of
+                                part_of_dyns = dyn_df[dyn_df['part_of'] == combo['dyn_id']]['dyn_id'].tolist()
+                                matched_dyn_ids.extend(part_of_dyns)
+                                # Also include the part_of value if it exists
+                                part_of_value = dyn_df[dyn_df['dyn_id'] == combo['dyn_id']]['part_of'].values
+                                if len(part_of_value) > 0 and pd.notna(part_of_value[0]):
+                                    matched_dyn_ids.append(part_of_value[0])
+                                matched_dyn_ids = list(set(matched_dyn_ids))  # Remove duplicates
+                            era_filter = era_filter[era_filter['dyn_id'].isin(matched_dyn_ids)]
+                        else:
+                            # Conflict - trust era_id, filter by era's actual dyn_id
+                            if era_actual_dyn_id is not None and pd.notna(era_actual_dyn_id):
+                                era_filter = era_filter[era_filter['dyn_id'] == era_actual_dyn_id]
+            else:
+                # No era_id specified, apply normal filtering logic
+                # Filter by ruler_id if specified (this enforces that era belongs to this ruler)
+                if combo['ruler_id'] is not None:
+                    era_filter = era_filter[era_filter['ruler_id'] == combo['ruler_id']]
+                
+                # Filter by dyn_id if specified (with part_of relationships)
+                if combo['dyn_id'] is not None:
+                    # Handle part_of relationships for dynasty
+                    matched_dyn_ids = [combo['dyn_id']]
+                    if 'part_of' in dyn_df.columns:
+                        # Find dynasties that have this as part_of
+                        part_of_dyns = dyn_df[dyn_df['part_of'] == combo['dyn_id']]['dyn_id'].tolist()
+                        matched_dyn_ids.extend(part_of_dyns)
+                        # Also include the part_of value if it exists
+                        part_of_value = dyn_df[dyn_df['dyn_id'] == combo['dyn_id']]['part_of'].values
+                        if len(part_of_value) > 0 and pd.notna(part_of_value[0]):
+                            matched_dyn_ids.append(part_of_value[0])
+                        matched_dyn_ids = list(set(matched_dyn_ids))  # Remove duplicates
+                    era_filter = era_filter[era_filter['dyn_id'].isin(matched_dyn_ids)]
             
             # If we have valid era matches, use them
             # The filter ensures that if multiple IDs are specified, they must all match together
@@ -779,7 +1065,7 @@ def add_can_names_bulk(table, ruler_can_names, dyn_df):
     return out
 
 
-def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, sequential=True, proliferate=False):
+def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, sequential=True, proliferate=False):
     """
     Optimized bulk version of extract_date_table using pandas operations.
     
@@ -788,7 +1074,9 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
     2. Bulk candidate generation (all combinations at once)
     3. Sequential constraint solving per date (preserving implied state)
     
-    :param xml_root:
+    :param xml_root: ElementTree element, XML root containing date elements
+    :param df: Optional DataFrame, pre-extracted date table. If None, will extract using dates_xml_to_df()
+    :param implied: Optional dict, implied state for sequential processing. If None, will be initialized with defaults
     :param pg: bool, proleptic gregorian flag
     :param gs: list, gregorian start date [YYYY, MM, DD]
     :param lang: str, language ('en' or 'fr')
@@ -799,210 +1087,304 @@ def extract_date_table_bulk(xml_root, implied=None, pg=False, gs=None, lang='en'
                    Should be tuple: (era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names)
     :param sequential: bool, intelligently forward fills missing date elements from previous Sinitic date string
     :param proliferate: bool, finds all candidates for date strings without dynasty, ruler, or era
+    :param attributes: bool, if True, extract attributes from <date> elements when df is None
     :return: tuple (xml_string, output_df, implied) - same format as extract_date_table()
     """
-    # Defaults
+    # Defaults  DPM: already in outer scope
     if gs is None:
         gs = DEFAULT_GREGORIAN_START
     if civ is None:
         civ = ['c', 'j', 'k']
     
-    if implied is None:
-        implied = {
-            'cal_stream_ls': [],
-            'dyn_id_ls': [],
-            'ruler_id_ls': [],
-            'era_id_ls': [],
-            'year': None,
-            'month': None,
-            'intercalary': None,
-            'sex_year': None
-        }
-    
+    # DPM: set in new inner scope
     if lang == 'en':
         phrase_dic = phrase_dic_en
     else:
         phrase_dic = phrase_dic_fr
     
-    # Step 1: Extract table
-    df = dates_xml_to_df(xml_root)
+    # Step 1: Extract table  DPM: Moved to outer scope
+    # df = dates_xml_to_df(xml_root, attributes=False)
+
     if df.empty:
-        xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
-        return xml_string, pd.DataFrame(), implied
-    
-    # Step 2: Normalize date fields (convert strings to numbers)
-    df = normalise_date_fields(df)
-    
-    # Step 3: Load all tables once (or use provided tables)
-    # Performance optimization: if tables are already loaded, reuse them to avoid copying
-    if tables is None:
-        tables = prepare_tables(civ=civ)
-    era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
-    master_table = era_df[['cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'era_start_year', 'era_end_year', 'era_start_jdn', 'era_end_jdn']].copy()
-    
-    # Step 4: Bulk resolve IDs (Phase 1)
-    df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
-    df = bulk_resolve_ruler_ids(df, ruler_tag_df)
-    df = bulk_resolve_era_ids(df, era_df)
+        output_df = df
+    else:
+        # TODO start debugging full and partial attribute column cases from here.
+        # Step 2: Normalize date fields (convert strings to numbers)  DPM: ready for outer scope
+        df = normalise_date_fields(df)
+        
+        # Save copy before resolution to check which IDs were explicit attributes vs resolved from strings
+        df_before_resolution = df.copy()
+        
+        # Step 3: Load all tables once (or use provided tables)  DPM: ready for outer scope
+        # Performance optimization: if tables are already loaded, reuse them to avoid copying
+        if tables is None:
+            tables = prepare_tables(civ=civ)
+        era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
+        master_table = era_df[['cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'era_start_year', 'era_end_year', 'era_start_jdn', 'era_end_jdn']].copy()
+        
+        # Step 4: Bulk resolve IDs (Phase 1)  DPM: to place in outer scope
+        df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
+        df = bulk_resolve_ruler_ids(df, ruler_tag_df)
+        df = bulk_resolve_era_ids(df, era_df)
 
-    # Step 5: Bulk generate candidates (Phase 2) 
-    df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
+        # Step 5: Bulk generate candidates (Phase 2)  DPM: integrate, to place in outer scope
+        df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
+        df_candidates['error_str'] = ""
+        
+        #############################################################################
+        all_results = []
+        
+        # Track all date_index values from original df to ensure none are lost
+        all_date_indices = sorted(df['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
+        
+        # Track previous date's results to check if it had multiple solved options
+        prev_date_idx = None
+        prev_date_results = None
+        
+        # Group by date_index and process sequentially [sex_year is fine at this point]
+        for date_idx in all_date_indices:
+            # Reset implied state for each date if not sequential
 
-    # Add report note
-    df_candidates['error_str'] = ""
-    
-    all_results = []
-    
-    # Track all date_index values from original df to ensure none are lost
-    all_date_indices = sorted(df['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
-    
-    # Group by date_index and process sequentially [sex_year is fine at this point]
-    for date_idx in all_date_indices:
-        # Reset implied state for each date if not sequential
-
-        g = df_candidates[df_candidates['date_index'] == date_idx].copy()
-        if g.empty:
-            # If no candidates were generated, create a fallback row from original df TODO verify this
-            original_rows = df[df['date_index'] == date_idx]
-            if not original_rows.empty:
-                g = original_rows.iloc[[0]].copy()
-                if 'error_str' not in g.columns:
-                    g['error_str'] = ""
-                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
-                g['error_str'] += phrase_dic.get('no-candidates', 'No candidates generated; ')
-            else:
+            # Check if previous date had multiple solved results - if so, reset implied state
+            # because we can't reliably carry forward ambiguous information
+            if sequential and prev_date_idx is not None and prev_date_results is not None:
+                if len(prev_date_results) > 1:
+                    # Previous date had multiple options after solving - reset implied state
+                    # Clear all implied values to avoid carrying forward ambiguous context
+                    implied['cal_stream_ls'] = []
+                    implied['dyn_id_ls'] = []
+                    implied['ruler_id_ls'] = []
+                    implied['era_id_ls'] = []
+                    implied['year'] = None
+                    implied['month'] = None
+                    implied['intercalary'] = None
+                    implied['sex_year'] = None
+            
+            # Get original row from df_before_resolution to check for explicit attributes
+            # (before string resolution, so we can distinguish attributes from resolved values)
+            original_rows_before = df_before_resolution[df_before_resolution['date_index'] == date_idx]
+            if original_rows_before.empty:
                 continue
-        
-        # Determine what constraints this date has
-        has_year = g['year'].notna().any()
-        has_sex_year = g['sex_year'].notna().any()
-        has_month = g['month'].notna().any() and not g['month'].isna().all()
-        has_day = g['day'].notna().any() and not g['day'].isna().all()
-        has_gz = g['gz'].notna().any() and not g['gz'].isna().all()
-        has_lp = g['lp'].notna().any() and not g['lp'].isna().all()
-        has_intercalary = g[g['has_int'] == 1].shape[0] == g.shape[0]
-        
-        # Apply implied values to incomplete candidates
-        no_year = not (has_year or has_sex_year)
-        no_month = not (has_month or has_intercalary)
-        no_day = not (has_day or has_gz or has_lp)
-        
-        if sequential:
-            if no_year:  # No year but some sort of day
-                if not no_month or not no_day:
-                    # Pick up year and everything higher from implied
-                    if (implied.get('cal_stream_ls') and len(implied['cal_stream_ls']) == 1 and ('cal_stream' not in g.columns or g['cal_stream'].isna().all())):
-                        g['cal_stream'] = implied['cal_stream_ls'][0]
-                    if (implied.get('dyn_id_ls') and len(implied['dyn_id_ls']) == 1 and ('dyn_id' not in g.columns or g['dyn_id'].isna().all())):
-                        g['dyn_id'] = implied['dyn_id_ls'][0]
-                    if (implied.get('ruler_id_ls') and len(implied['ruler_id_ls']) == 1 and ('ruler_id' not in g.columns or g['ruler_id'].isna().all())):
-                        g['ruler_id'] = implied['ruler_id_ls'][0]
-                    if (implied.get('era_id_ls') and len(implied['era_id_ls']) == 1 and ('era_id' not in g.columns or g['era_id'].isna().all())):
-                        g['era_id'] = implied['era_id_ls'][0]
-                        bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
-                        g['era_start_year'] = bloc['era_start_year'].values[0]
-                    if implied.get('year') is not None and ('year' not in g.columns or g['year'].isna().all()):
-                        g['year'] = implied['year']
-                    if implied.get('sex_year') is not None and ('sex_year' not in g.columns or g['sex_year'].isna().all()):
-                        g['sex_year'] = implied['sex_year']
-                    has_year = True
-                # If there is no month, pick that up
-                if no_month and not no_day:
-                    if implied.get('month') is not None and ('month' not in g.columns or g['month'].isna().all()):
-                        g['month'] = implied['month']
-                    if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
-                        g['intercalary'] = implied['intercalary']
-                    has_month = True
-        
-        # Determine date type
-        is_simple = not has_year and not has_sex_year and not has_month and not has_day and not has_gz and not has_lp
-        # Solve based on date type
-        if is_simple:
-            # Simple date (dynasty/era only)
-            result_df, implied = solve_date_simple(
-                g, implied, phrase_dic, tpq, taq
-            )
-        elif has_month or has_day or has_gz or has_lp:
-            # Date with lunar constraints
-            # First handle year if present            
-            if has_year or has_sex_year:
-                g, implied = solve_date_with_year(
-                    g, implied, era_df, phrase_dic, tpq, taq,
-                    has_month, has_day, has_gz, has_lp
+            original_row_before = original_rows_before.iloc[0]
+            
+            # Get row from df (after resolution) for current state
+            original_rows = df[df['date_index'] == date_idx]
+            if original_rows.empty:
+                continue
+            original_row = original_rows.iloc[0]
+            
+            # Check if an era is explicitly specified via ATTRIBUTE (not via string resolution)
+            # Only reset implied state when era_id is an explicit attribute
+            # When era_str resolves to multiple eras, let candidate generation filter them
+            has_explicit_era, explicit_era_id = check_explicit_attribute(original_row_before, 'era_id')
+            
+            # If era is explicitly specified, reset implied state to match that era's context
+            if sequential and has_explicit_era and explicit_era_id is not None:
+                reset_implied_state_for_era(implied, explicit_era_id, era_df)
+            
+            # Check if a dynasty is explicitly specified via ATTRIBUTE (not via string resolution)
+            # When a dynasty is explicitly specified, it should reset implied cal_stream, dyn_id
+            # (era is most specific, then ruler, then dynasty - check in order)
+            has_explicit_dynasty = False
+            explicit_dyn_id = None
+            if not has_explicit_era:  # Only check if no explicit era (era takes precedence)
+                has_explicit_dynasty, explicit_dyn_id = check_explicit_attribute(original_row_before, 'dyn_id')
+            
+            # Check if a ruler is explicitly specified via ATTRIBUTE (not via string resolution)
+            # When a ruler is explicitly specified, it should reset implied cal_stream, dyn_id, ruler_id
+            has_explicit_ruler = False
+            explicit_ruler_id = None
+            if not has_explicit_era:  # Only check if no explicit era (era takes precedence)
+                has_explicit_ruler, explicit_ruler_id = check_explicit_attribute(original_row_before, 'ruler_id')
+            
+            # Reset implied state based on explicit specifications (ruler > dynasty in specificity)
+            if sequential:
+                if has_explicit_ruler and explicit_ruler_id is not None:
+                    reset_implied_state_for_ruler(implied, explicit_ruler_id, ruler_df)
+                elif has_explicit_dynasty and explicit_dyn_id is not None:
+                    reset_implied_state_for_dynasty(implied, explicit_dyn_id, dyn_df)
+
+            g = df_candidates[df_candidates['date_index'] == date_idx].copy()
+            no_candidates_generated = False
+            if g.empty:
+                # If no candidates were generated, create a fallback row from original df TODO verify this
+                if not original_rows.empty:
+                    g = original_rows.iloc[[0]].copy()
+                    if 'error_str' not in g.columns:
+                        g['error_str'] = ""
+                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    g['error_str'] += phrase_dic.get('no-candidates', 'No candidates generated; ')
+                    no_candidates_generated = True
+                else:
+                    continue
+            
+            # Determine what constraints this date has
+            has_year = g['year'].notna().any()
+            has_sex_year = g['sex_year'].notna().any()
+            has_month = g['month'].notna().any() and not g['month'].isna().all()
+            has_day = g['day'].notna().any() and not g['day'].isna().all()
+            has_gz = g['gz'].notna().any() and not g['gz'].isna().all()
+            has_lp = g['lp'].notna().any() and not g['lp'].isna().all()
+            has_intercalary = g[g['has_int'] == 1].shape[0] == g.shape[0]
+            
+            # Apply implied values to incomplete candidates
+            no_year = not (has_year or has_sex_year)
+            no_month = not (has_month or has_intercalary)
+            no_day = not (has_day or has_gz or has_lp)
+            
+            if sequential:
+                if no_year:  # No year but some sort of day
+                    if not no_month or not no_day:
+                        # Pick up year and everything higher from implied
+                        if (implied.get('cal_stream_ls') and len(implied['cal_stream_ls']) == 1 and ('cal_stream' not in g.columns or g['cal_stream'].isna().all())):
+                            g['cal_stream'] = implied['cal_stream_ls'][0]
+                        if (implied.get('dyn_id_ls') and len(implied['dyn_id_ls']) == 1 and ('dyn_id' not in g.columns or g['dyn_id'].isna().all())):
+                            g['dyn_id'] = implied['dyn_id_ls'][0]
+                        if (implied.get('ruler_id_ls') and len(implied['ruler_id_ls']) == 1 and ('ruler_id' not in g.columns or g['ruler_id'].isna().all())):
+                            g['ruler_id'] = implied['ruler_id_ls'][0]
+                        if (implied.get('era_id_ls') and len(implied['era_id_ls']) == 1 and ('era_id' not in g.columns or g['era_id'].isna().all())):
+                            g['era_id'] = implied['era_id_ls'][0]
+                            bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
+                            g['era_start_year'] = bloc['era_start_year'].values[0]
+                        if implied.get('year') is not None and ('year' not in g.columns or g['year'].isna().all()):
+                            g['year'] = implied['year']
+                        if implied.get('sex_year') is not None and ('sex_year' not in g.columns or g['sex_year'].isna().all()):
+                            g['sex_year'] = implied['sex_year']
+                        has_year = True
+                    # If there is no month, pick that up
+                    if no_month and not no_day:
+                        if implied.get('month') is not None and ('month' not in g.columns or g['month'].isna().all()):
+                            g['month'] = implied['month']
+                        if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
+                            g['intercalary'] = implied['intercalary']
+                        has_month = True
+            
+            # Check if we have sufficient context for dates with year/month/day constraints
+            # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
+            has_temporal_constraints = has_year or has_sex_year or has_month or has_day or has_gz or has_lp
+            has_context = False
+            if has_temporal_constraints and no_candidates_generated:
+                # Check if we have era/dynasty/ruler context (either explicit or from implied, after applying implied)
+                has_era = ('era_id' in g.columns and g['era_id'].notna().any()) or (implied.get('era_id_ls') and len(implied['era_id_ls']) > 0)
+                has_dyn = ('dyn_id' in g.columns and g['dyn_id'].notna().any()) or (implied.get('dyn_id_ls') and len(implied['dyn_id_ls']) > 0)
+                has_ruler = ('ruler_id' in g.columns and g['ruler_id'].notna().any()) or (implied.get('ruler_id_ls') and len(implied['ruler_id_ls']) > 0)
+                has_context = has_era or has_dyn or has_ruler
+                
+                # If we have temporal constraints but no context and no candidates were generated
+                if not has_context:
+                    # Replace "no candidates" error with "insufficient information"
+                    g['error_str'] = phrase_dic.get('insufficient-information', 'Insufficient information; ')
+                    # Skip solving - just return the error row
+                    result_df = g.copy()
+                    result_df['date_index'] = date_idx
+                    result_df['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
+                    all_results.append(result_df)
+                    prev_date_results = result_df
+                    prev_date_idx = date_idx
+                    continue
+            
+            # Determine date type
+            is_simple = not has_year and not has_sex_year and not has_month and not has_day and not has_gz and not has_lp
+            # Solve based on date type
+            if is_simple:
+                # Simple date (dynasty/era only)
+                result_df, implied = solve_date_simple(
+                    g, implied, phrase_dic, tpq, taq
                 )
+            elif has_month or has_day or has_gz or has_lp:
+                # Date with lunar constraints
+                # First handle year if present            
+                if has_year or has_sex_year:
+                    g, implied = solve_date_with_year(
+                        g, implied, era_df, phrase_dic, tpq, taq,
+                        has_month, has_day, has_gz, has_lp
+                    )
 
-            # Apply lunar constraints to the candidates (whether year was solved or not)
-            month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
-            day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
-            gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
-            lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
-            intercalary_val = 1 if has_intercalary else None
+                # Apply lunar constraints to the candidates (whether year was solved or not)
+                month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
+                day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
+                gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
+                lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
+                intercalary_val = 1 if has_intercalary else None
 
-            result_df, implied = solve_date_with_lunar_constraints(
-                g, implied, lunar_table, phrase_dic,
-                month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
-                tpq=tpq, taq=taq, pg=pg, gs=gs
-            )
-            # If lunar constraints resulted in no matches (likely due to corruption),
-            # use the original input dataframe instead of empty
+                result_df, implied = solve_date_with_lunar_constraints(
+                    g, implied, lunar_table, phrase_dic,
+                    month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
+                    tpq=tpq, taq=taq, pg=pg, gs=gs
+                )
+                # If lunar constraints resulted in no matches (likely due to corruption),
+                # use the original input dataframe instead of empty
+                if result_df.empty:
+                    result_df = g.copy()
+                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
+
+                # Add metadata to result_df if not empty
+                if not result_df.empty:
+                    if 'cal_stream' in result_df.columns and 'ind_year' in result_df.columns:
+                        result_df = result_df.sort_values(by=['cal_stream', 'ind_year'])
+            else:
+                # Year-only date (no month/day constraints)
+                result_df, implied = solve_date_with_year(
+                    g, implied, era_df, phrase_dic, tpq, taq,
+                    False, False, False, False
+                )
+                # If year-only date solving resulted in no matches, return original candidates
+                if result_df.empty:
+                    result_df = g.copy()
+                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    result_df['error_str'] += phrase_dic.get('year-solving-failed', 'Year resolution failed; ')
+
+            # Add date_index and date_string to result
+            # Ensure we always include the date, even if solving failed
             if result_df.empty:
-                result_df = g.copy()
-                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
-                result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
-
-            # Add metadata to result_df if not empty
+                # If solving completely failed, create a fallback row from original candidates
+                result_df = g.iloc[[0]].copy() if not g.empty else pd.DataFrame()
+                if not result_df.empty:
+                    if 'error_str' not in result_df.columns:
+                        result_df['error_str'] = ""
+                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    result_df['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
+            
             if not result_df.empty:
-                if 'cal_stream' in result_df.columns and 'ind_year' in result_df.columns:
-                    result_df = result_df.sort_values(by=['cal_stream', 'ind_year'])
-        else:
-            # Year-only date (no month/day constraints)
-            result_df, implied = solve_date_with_year(
-                g, implied, era_df, phrase_dic, tpq, taq,
-                False, False, False, False
-            )
-            # If year-only date solving resulted in no matches, return original candidates
-            if result_df.empty:
-                result_df = g.copy()
+                # Clear preliminary errors if date was successfully resolved
+                result_df = clear_preliminary_errors(result_df)
+                
+                result_df['date_index'] = date_idx
+                result_df['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
+                all_results.append(result_df)
+                # Store this date's results for next iteration
+                prev_date_results = result_df
+            elif not g.empty:
+                # Last resort: create a minimal row from the first candidate to ensure date is not lost
+                fallback_row = g.iloc[[0]].copy()
+                fallback_row['date_index'] = date_idx
+                fallback_row['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
+                if 'error_str' not in fallback_row.columns:
+                    fallback_row['error_str'] = ""
                 phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
-                result_df['error_str'] += phrase_dic.get('year-solving-failed', 'Year resolution failed; ')
-
-        # Add date_index and date_string to result
-        # Ensure we always include the date, even if solving failed
-        if result_df.empty:
-            # If solving completely failed, create a fallback row from original candidates
-            result_df = g.iloc[[0]].copy() if not g.empty else pd.DataFrame()
-            if not result_df.empty:
-                if 'error_str' not in result_df.columns:
-                    result_df['error_str'] = ""
-                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
-                result_df['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
+                fallback_row['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
+                all_results.append(fallback_row)
+                # Store this date's results for next iteration (single row fallback)
+                prev_date_results = fallback_row
+            else:
+                # No results - clear previous results
+                prev_date_results = None
+            
+            # Update previous date_index for next iteration
+            prev_date_idx = date_idx
         
-        if not result_df.empty:
-            result_df['date_index'] = date_idx
-            result_df['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
-            all_results.append(result_df)
-        elif not g.empty:
-            # Last resort: create a minimal row from the first candidate to ensure date is not lost
-            fallback_row = g.iloc[[0]].copy()
-            fallback_row['date_index'] = date_idx
-            fallback_row['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
-            if 'error_str' not in fallback_row.columns:
-                fallback_row['error_str'] = ""
-            phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
-            fallback_row['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
-            all_results.append(fallback_row)
-    
-    # Combine all results
-    if all_results:
-        # output_df = pd.concat(all_results, ignore_index=True)
-        # Filter out empty DataFrames to avoid the warning
-        non_empty_results = [df for df in all_results if not df.empty]
-        if non_empty_results:
-            output_df = pd.concat(non_empty_results, ignore_index=True)
+        # Combine all results
+        if all_results:
+            # output_df = pd.concat(all_results, ignore_index=True)
+            # Filter out empty DataFrames to avoid the warning
+            non_empty_results = [df for df in all_results if not df.empty]
+            if non_empty_results:
+                output_df = pd.concat(non_empty_results, ignore_index=True)
+            else:
+                output_df = pd.DataFrame()
         else:
             output_df = pd.DataFrame()
-    else:
-        output_df = pd.DataFrame()
 
     # Return XML string (unchanged) and output dataframe
     xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
