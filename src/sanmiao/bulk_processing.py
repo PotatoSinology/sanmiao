@@ -1,4 +1,5 @@
 import re
+import numpy as np
 import pandas as pd
 import lxml.etree as et
 from .config import (
@@ -241,6 +242,7 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
             "day_str": get1(".//tei:day" if ns else ".//day"),
             "gz_str": get1(".//tei:gz" if ns else ".//gz"),
             "lp_str": get1(".//tei:lp" if ns else ".//lp"),
+            "nmd_gz_str": get1(".//tei:nmd_gz" if ns else ".//nmdgz"),
             "has_int": 1 if node.xpath(".//tei:int" if ns else ".//int", namespaces=ns) else 0,
         })
 
@@ -280,6 +282,8 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
             present_elements += "i"
         if ('lp' in row and pd.notna(row.get('lp'))) or (row['lp_str'] and row['lp_str'].strip()):
             present_elements += "l"
+        if ('nmd_gz' in row and pd.notna(row.get('nmd_gz'))) or (row['nmd_gz_str'] and row['nmd_gz_str'].strip()):
+            present_elements += "z"
         if ('day' in row and pd.notna(row.get('day'))) or (row['day_str'] and row['day_str'].strip()):
             present_elements += "d"
         if ('gz' in row and pd.notna(row.get('gz'))) or (row['gz_str'] and row['gz_str'].strip()):
@@ -309,30 +313,35 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
     # year - only process string if attribute doesn't exist or is NaN for that row
     # Initialize year column if it doesn't exist
     if 'year' not in out.columns:
-        out['year'] = None
+        out['year'] = pd.Series(index=out.index, dtype='float64')  # Initialize with proper dtype
     
     # Process string only for rows where year attribute is missing/NaN
     mask_no_attr = out['year'].isna()
     
     if 'year_str' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "year"] = out.loc[mask_no_attr, "year_str"].where(
-            out.loc[mask_no_attr, "year_str"].notna(), None
-        )
-        out.loc[mask_no_attr & (out["year_str"] == "元年"), "year"] = 1
+        # Handle "元年" case first
+        yuan_mask = mask_no_attr & (out["year_str"] == "元年")
+        if yuan_mask.any():
+            out.loc[yuan_mask, "year"] = 1.0
+        # Convert numeric strings
         m = mask_no_attr & out["year_str"].notna() & (out["year_str"] != "元年")
-        # Strip 年 character before converting numerals
-        out.loc[m, "year"] = out.loc[m, "year_str"].str.rstrip('年').map(numcon)
+        if m.any():
+            out.loc[m, "year"] = out.loc[m, "year_str"].str.rstrip('年').map(numcon).astype('float64')
 
     # sexYear - only process string if attribute doesn't exist or is NaN for that row
     if 'sex_year' not in out.columns:
-        out['sex_year'] = None
+        out['sex_year'] = pd.Series(index=out.index, dtype='float64')  # Initialize with proper dtype
     
     mask_no_attr = out['sex_year'].isna()
     
     if 'sexYear_str' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "sex_year"] = out.loc[mask_no_attr, "sexYear_str"].map(
+        # Convert values before assignment to avoid dtype warnings
+        sex_year_values = out.loc[mask_no_attr, "sexYear_str"].map(
             lambda s: ganshu(s) if isinstance(s, str) and s else None
         )
+        # Convert None to NaN for float64 column compatibility
+        sex_year_values = sex_year_values.where(sex_year_values.notna(), np.nan).astype('float64')
+        out.loc[mask_no_attr, "sex_year"] = sex_year_values
     
     # month - only process string if attribute doesn't exist or is NaN for that row
     def month_to_int(s):
@@ -383,6 +392,17 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
     if 'lp_str' in out.columns and mask_no_attr.any():
         out.loc[mask_no_attr, "lp"] = out.loc[mask_no_attr, "lp_str"].map(
             lambda s: LP_DIC.get(s) if isinstance(s, str) else None
+        )
+
+    # nmd_gz (next month's day sexagenary number) - only process string if attribute doesn't exist or is NaN for that row
+    if 'nmd_gz' not in out.columns:
+        out['nmd_gz'] = None
+    
+    mask_no_attr = out['nmd_gz'].isna()
+    
+    if 'nmd_gz_str' in out.columns and mask_no_attr.any():
+        out.loc[mask_no_attr, "nmd_gz"] = out.loc[mask_no_attr, "nmd_gz_str"].map(
+            lambda s: ganshu(s) if isinstance(s, str) and s else None
         )
 
     # intercalary - only process has_int if attribute doesn't exist or is NaN for that row
@@ -713,7 +733,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 t_lt = t_lt[(t_lt['ind_year'] >= tpq) & (t_lt['ind_year'] <= taq)]
                 
                 # Clean columns
-                cols = ['year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str']
+                cols = ['year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str', 'nmd_gz_str']
                 cols = [i for i in cols if i in t_out.columns]
                 t_out = t_out.drop(columns=cols)
                 
@@ -1023,7 +1043,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     # else:
     #     candidates_df['cal_stream'] = 1.0
 
-    cols = ['dyn_str', 'ruler_str', 'era_str', 'year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str', 'year_gz']
+    cols = ['dyn_str', 'ruler_str', 'era_str', 'year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str', 'nmd_gz_str', 'year_gz']
     cols = [i for i in cols if i in candidates_df.columns]
     candidates_df = candidates_df.drop(columns=cols)
     
@@ -1219,18 +1239,19 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
                     continue
             
             # Determine what constraints this date has
-            has_year = g['year'].notna().any()
-            has_sex_year = g['sex_year'].notna().any()
-            has_month = g['month'].notna().any() and not g['month'].isna().all()
-            has_day = g['day'].notna().any() and not g['day'].isna().all()
-            has_gz = g['gz'].notna().any() and not g['gz'].isna().all()
-            has_lp = g['lp'].notna().any() and not g['lp'].isna().all()
-            has_intercalary = g[g['has_int'] == 1].shape[0] == g.shape[0]
+            has_year = g['year'].notna().any() if 'year' in g.columns else False
+            has_sex_year = g['sex_year'].notna().any() if 'sex_year' in g.columns else False
+            has_month = g['month'].notna().any() and not g['month'].isna().all() if 'month' in g.columns else False
+            has_day = g['day'].notna().any() and not g['day'].isna().all() if 'day' in g.columns else False
+            has_gz = g['gz'].notna().any() and not g['gz'].isna().all() if 'gz' in g.columns else False
+            has_lp = g['lp'].notna().any() and not g['lp'].isna().all() if 'lp' in g.columns else False
+            has_nmd_gz = g['nmd_gz'].notna().any() and not g['nmd_gz'].isna().all() if 'nmd_gz' in g.columns else False
+            has_intercalary = g[g['has_int'] == 1].shape[0] == g.shape[0] if 'has_int' in g.columns else False
             
             # Apply implied values to incomplete candidates
             no_year = not (has_year or has_sex_year)
             no_month = not (has_month or has_intercalary)
-            no_day = not (has_day or has_gz or has_lp)
+            no_day = not (has_day or has_gz or has_lp or has_nmd_gz)
             
             if sequential:
                 if no_year:  # No year but some sort of day
@@ -1261,7 +1282,7 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
             
             # Check if we have sufficient context for dates with year/month/day constraints
             # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
-            has_temporal_constraints = has_year or has_sex_year or has_month or has_day or has_gz or has_lp
+            has_temporal_constraints = has_year or has_sex_year or has_month or has_day or has_gz or has_lp or has_nmd_gz
             has_context = False
             if has_temporal_constraints and no_candidates_generated:
                 # Check if we have era/dynasty/ruler context (either explicit or from implied, after applying implied)
@@ -1284,14 +1305,14 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
                     continue
             
             # Determine date type
-            is_simple = not has_year and not has_sex_year and not has_month and not has_day and not has_gz and not has_lp
+            is_simple = not has_year and not has_sex_year and not has_month and not has_day and not has_gz and not has_lp and not has_nmd_gz
             # Solve based on date type
             if is_simple:
                 # Simple date (dynasty/era only)
                 result_df, implied = solve_date_simple(
                     g, implied, phrase_dic, tpq, taq
                 )
-            elif has_month or has_day or has_gz or has_lp:
+            elif has_month or has_day or has_gz or has_lp or has_nmd_gz:
                 # Date with lunar constraints
                 # First handle year if present            
                 if has_year or has_sex_year:
@@ -1305,11 +1326,12 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
                 day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
                 gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
                 lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
+                nmd_gz_val = g.iloc[0].get('nmd_gz') if has_nmd_gz and pd.notna(g.iloc[0].get('nmd_gz')) else None
                 intercalary_val = 1 if has_intercalary else None
 
                 result_df, implied = solve_date_with_lunar_constraints(
                     g, implied, lunar_table, phrase_dic,
-                    month=month_val, day=day_val, gz=gz_val, lp=lp_val, intercalary=intercalary_val,
+                    month=month_val, day=day_val, gz=gz_val, lp=lp_val, nmd_gz=nmd_gz_val, intercalary=intercalary_val,
                     tpq=tpq, taq=taq, pg=pg, gs=gs
                 )
                 # If lunar constraints resulted in no matches (likely due to corruption),
@@ -1341,6 +1363,11 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
                 # If solving completely failed, create a fallback row from original candidates
                 result_df = g.iloc[[0]].copy() if not g.empty else pd.DataFrame()
                 if not result_df.empty:
+                    # Preserve present_elements if it exists
+                    if 'present_elements' not in result_df.columns and 'present_elements' in g.columns:
+                        present_elements_val = g.iloc[0].get('present_elements', '')
+                        if pd.notna(present_elements_val):
+                            result_df['present_elements'] = present_elements_val
                     if 'error_str' not in result_df.columns:
                         result_df['error_str'] = ""
                     phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
@@ -1350,8 +1377,17 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
                 # Clear preliminary errors if date was successfully resolved
                 result_df = clear_preliminary_errors(result_df)
                 
+                # Preserve metadata columns from original candidates
                 result_df['date_index'] = date_idx
                 result_df['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
+                # Preserve present_elements from original candidates if it exists
+                # (solving functions may not preserve this column)
+                if 'present_elements' in g.columns and not g.empty:
+                    present_elements_val = g.iloc[0].get('present_elements', '')
+                    if pd.notna(present_elements_val) and present_elements_val != '':
+                        # Copy to all rows in result_df (in case solving expanded to multiple rows)
+                        result_df['present_elements'] = present_elements_val
+                
                 all_results.append(result_df)
                 # Store this date's results for next iteration
                 prev_date_results = result_df
@@ -1360,6 +1396,11 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
                 fallback_row = g.iloc[[0]].copy()
                 fallback_row['date_index'] = date_idx
                 fallback_row['date_string'] = g.iloc[0].get('date_string', '') if not g.empty else 'unknown'
+                # Preserve present_elements if it exists
+                if 'present_elements' not in fallback_row.columns and 'present_elements' in g.columns:
+                    present_elements_val = g.iloc[0].get('present_elements', '')
+                    if pd.notna(present_elements_val):
+                        fallback_row['present_elements'] = present_elements_val
                 if 'error_str' not in fallback_row.columns:
                     fallback_row['error_str'] = ""
                 phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
@@ -1376,11 +1417,20 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
         
         # Combine all results
         if all_results:
-            # output_df = pd.concat(all_results, ignore_index=True)
             # Filter out empty DataFrames to avoid the warning
             non_empty_results = [df for df in all_results if not df.empty]
             if non_empty_results:
-                output_df = pd.concat(non_empty_results, ignore_index=True)
+                # Drop columns that are all-NA to avoid concat warnings
+                cleaned_results = []
+                for df in non_empty_results:
+                    # Keep only columns that have at least one non-NA value
+                    df_cleaned = df.dropna(axis=1, how='all')
+                    if not df_cleaned.empty:
+                        cleaned_results.append(df_cleaned)
+                if cleaned_results:
+                    output_df = pd.concat(cleaned_results, ignore_index=True)
+                else:
+                    output_df = pd.DataFrame()
             else:
                 output_df = pd.DataFrame()
         else:
