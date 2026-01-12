@@ -338,7 +338,7 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
 
 
 def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase_dic_en,
-                                      month=None, day=None, gz=None, lp=None, intercalary=None,
+                                      month=None, day=None, gz=None, lp=None, nmd_gz=None, intercalary=None,
                                       tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, pg=False, gs=None):
     """
     Solve dates with month/day/sexagenary day/lunar phase constraints.
@@ -368,6 +368,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
     has_day = day is not None and str(day) != '' and str(day) != 'nan'
     has_gz = gz is not None and str(gz) != '' and str(gz) != 'nan'
     has_lp = lp is not None and str(lp) != '' and str(lp) != 'nan'
+    has_nmd_gz = nmd_gz is not None and str(nmd_gz) != '' and str(nmd_gz) != 'nan'
     stop_at_month = has_month and not has_day and not has_gz and not has_lp
     
     # Normalize month to list
@@ -410,7 +411,8 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
     # Rename lunar table columns to avoid conflicts with candidate dataframe
     lunar_filtered = lunar_filtered.rename(columns={
         'month': 'lunar_month',
-        'intercalary': 'lunar_intercalary'
+        'intercalary': 'lunar_intercalary',
+        'nmd_gz': 'lunar_nmd_gz'
     })
 
     # Merge lunar table with candidate dataframe
@@ -471,47 +473,56 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             df['ISO_Date_Start'] = df['nmd_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             df['ISO_Date_End'] = df['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             if 'nmd_gz' in df.columns:
-                if not df.dropna(subset=['nmd_gz']).empty:
-                    df['start_gz'] = df['nmd_gz'].apply(lambda g: ganshu(g))
+                if not df.dropna(subset=['lunar_nmd_gz']).empty:
+                    df['start_gz'] = df['lunar_nmd_gz'].apply(lambda g: ganshu(g))
                     # Remove duplicate columns before apply
-                    df['end_gz'] = df.apply(lambda row: ganshu((row['nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
+                    df['end_gz'] = df.apply(lambda row: ganshu((row['lunar_nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
         
         return df, updated_implied
 
     # Handle combinations of day/gz/lp constraints
     if has_lp and has_gz and has_day:
-        # Filter
-        temp = df.copy()
-        temp['_gz'] = ((temp['nmd_gz'] + temp['day'] - 2) % 60) + 1
-        temp = temp[temp['gz'] == temp['_gz']]
-        del temp['_gz']
-        if temp.empty:
-            df = g.copy()
-            df = df[df['month'] == df['lunar_month']].copy()
-            if 'error_str' not in df.columns:
-                df['error_str'] = ""
-            df['error_str'] += phrase_dic.get('lp-gz-day-mismatch', 'Lunar phase-gz-day mismatch; ')
+        if has_nmd_gz:
+            temp = df[df['lunar_nmd_gz'] == nmd_gz]
+            if temp.empty:
+                df = g.copy()
+                df = df[df['month'] == df['lunar_month']].copy()
+                if 'error_str' not in df.columns:
+                    df['error_str'] = ""
+                df['error_str'] += phrase_dic.get('lp-gz-nmdgz-mismatch')
         else:
-            df = temp
-            df['jdn'] = df['nmd_jdn'] + df['day'] - 1
+            # Filter
+            temp = df.copy()
+            temp['_gz'] = ((temp['lunar_nmd_gz'] + temp['day'] - 2) % 60) + 1
+            temp = temp[temp['gz'] == temp['_gz']]
+            del temp['_gz']
+            if temp.empty:
+                df = g.copy()
+                df = df[df['month'] == df['lunar_month']].copy()
+                if 'error_str' not in df.columns:
+                    df['error_str'] = ""
+                df['error_str'] += phrase_dic.get('lp-gz-day-mismatch', 'Lunar phase-gz-day mismatch; ')
+            else:
+                df = temp
+                df['jdn'] = df['nmd_jdn'] + df['day'] - 1
     
-    if has_lp and not has_gz and not has_day:
+    if has_lp and not has_gz and not has_day and not has_nmd_gz:
         # Lunar phase only (朔 or 晦)
         if lp_value == -1:  # 晦 (last day)
             df['jdn'] = df['nmd_jdn'] + df['max_day'] - 1
             df['day'] = df['max_day']
-            df['gz'] = (df['nmd_gz'] + df['max_day'] - 2) % 60 + 1
+            df['gz'] = (df['lunar_nmd_gz'] + df['max_day'] - 2) % 60 + 1
             df['lp'] = -1
         elif lp_value == 0:  # 朔 (new moon, first day)
             df['jdn'] = df['nmd_jdn']
             df['day'] = 1
-            df['gz'] = df['nmd_gz']
+            df['gz'] = df['lunar_nmd_gz']
             df['lp'] = 0
         
         if 'nmd_gz' in df.columns:
-            df = df.drop(columns=['nmd_gz'])
+            df = df.drop(columns=['lunar_nmd_gz'])
     
-    elif has_lp and has_gz and not has_day:
+    elif has_lp and has_gz and not has_day and not has_nmd_gz:
         # Lunar phase + sexagenary day
         if lp_value == -1:  # 晦
             
@@ -527,7 +538,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
                 df['jdn'] = df['hui_jdn']
                 df['day'] = df['max_day']
         elif lp_value == 0:  # 朔
-            df = df[df['gz'] == df['nmd_gz']].copy()
+            df = df[df['gz'] == df['lunar_nmd_gz']].copy()
             if df.empty:
                 df = g.copy()
                 df = df[df['month'] == df['lunar_month']].copy()
@@ -562,10 +573,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             else:
                 df = month_match
     
-    elif has_gz and has_day and not has_lp:
+    elif has_gz and has_day and not has_lp and not has_nmd_gz:
         # Sexagenary day + numeric day
         df['jdn'] = df['nmd_jdn'] + day - 1
-        df['jdn2'] = ((gz - df['nmd_gz']) % 60) + df['nmd_jdn']
+        df['jdn2'] = ((gz - df['lunar_nmd_gz']) % 60) + df['nmd_jdn']
         df = df[df['jdn'] == df['jdn2']].copy()
         df = df.drop(columns=['jdn2'])
         
@@ -584,9 +595,9 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             df = df[df['month'] == df['lunar_month']].copy()
             df['error_str'] += "Month-day-gz mismatch; "
     
-    elif has_gz and not has_day and not has_lp:
+    elif has_gz and not has_day and not has_lp and not has_nmd_gz:
         # Sexagenary day only
-        df['day'] = ((gz - df['nmd_gz']) % 60) + 1
+        df['day'] = ((gz - df['lunar_nmd_gz']) % 60) + 1
         df = df[df['day'] <= df['max_day']]
         if df.empty:
             df = g.copy()
@@ -622,15 +633,15 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             df['jdn'] = df['day'] + df['nmd_jdn'] - 1
             df['gz'] = gz
             if 'nmd_gz' in df.columns:
-                df = df.drop(columns=['nmd_gz'])
+                df = df.drop(columns=['lunar_nmd_gz'])
     
-    elif has_day and not has_gz and not has_lp:
+    elif has_day and not has_gz and not has_lp and not has_nmd_gz:
         # Numeric day only
         df['day'] = day
         df['jdn'] = df['day'] + df['nmd_jdn'] - 1
         if 'nmd_gz' in df.columns:
-            df['gz'] = (df['nmd_gz'] + day - 2) % 60 + 1
-            df = df.drop(columns=['nmd_gz'])
+            df['gz'] = (df['lunar_nmd_gz'] + day - 2) % 60 + 1
+            df = df.drop(columns=['lunar_nmd_gz'])
         
         df = df[df['day'] <= df['max_day']]
         if df.empty:
