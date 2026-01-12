@@ -471,9 +471,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             df['ISO_Date_Start'] = df['nmd_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             df['ISO_Date_End'] = df['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             if 'nmd_gz' in df.columns:
-                df['start_gz'] = df['nmd_gz'].apply(lambda g: ganshu(g))
-                # Remove duplicate columns before apply
-                df['end_gz'] = df.apply(lambda row: ganshu((row['nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
+                if not df.dropna(subset=['nmd_gz']).empty:
+                    df['start_gz'] = df['nmd_gz'].apply(lambda g: ganshu(g))
+                    # Remove duplicate columns before apply
+                    df['end_gz'] = df.apply(lambda row: ganshu((row['nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
         
         return df, updated_implied
 
