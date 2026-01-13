@@ -870,14 +870,12 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 if not ruler_info.empty:
                     ruler_row = ruler_info.iloc[0]
 
-                    # When ruler is explicitly specified, its dyn_id is authoritative
-                    # If combo has a conflicting dyn_id (from implied state), trust the ruler's actual dyn_id
+                    # When both dynasty and ruler are specified, filter by dynasty
+                    # If combo has a dyn_id that doesn't match the ruler's actual dynasty, skip this ruler
                     if combo['dyn_id'] is not None and pd.notna(ruler_row.get('dyn_id')):
                         if int(combo['dyn_id']) != int(ruler_row['dyn_id']):
-                            # Conflict: combo's dyn_id doesn't match ruler's actual dynasty
-                            # Trust the ruler's actual dynasty (it's explicitly specified)
-                            # Continue with ruler's dyn_id instead of skipping
-                            pass  # We'll use ruler_row['dyn_id'] below, which is correct
+                            # Dynasty mismatch: skip this ruler (don't include in candidates)
+                            continue
 
                     # Create candidate using ruler's reign period
                     candidate_row = {
@@ -905,52 +903,27 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             if combo['era_id'] is not None:
                 era_filter = era_filter[era_filter['era_id'] == combo['era_id']]
                 
-                # When era_id is explicitly specified, it's authoritative
-                # If the era's actual dyn_id/ruler_id conflicts with combo's values,
-                # trust the era_id and use the era's actual IDs
+                # When both dynasty/ruler and era are specified, filter by both
+                # If the era doesn't match the specified dynasty/ruler, it will be filtered out
                 if not era_filter.empty:
-                    era_row = era_filter.iloc[0]
-                    era_actual_dyn_id = era_row.get('dyn_id')
-                    era_actual_ruler_id = era_row.get('ruler_id')
-                    
-                    # If combo has dyn_id/ruler_id that conflicts with era's actual ones,
-                    # don't filter by the conflicting combo values - use era's actual IDs
-                    dyn_conflicts = (combo['dyn_id'] is not None and 
-                                    era_actual_dyn_id is not None and 
-                                    pd.notna(era_actual_dyn_id) and
-                                    int(combo['dyn_id']) != int(era_actual_dyn_id))
-                    ruler_conflicts = (combo['ruler_id'] is not None and 
-                                      era_actual_ruler_id is not None and 
-                                      pd.notna(era_actual_ruler_id) and
-                                      int(combo['ruler_id']) != int(era_actual_ruler_id))
-                    
-                    # Filter by ruler_id only if it matches era's actual ruler_id (or if no conflict)
+                    # Filter by ruler_id if specified
                     if combo['ruler_id'] is not None:
-                        if not ruler_conflicts:
-                            era_filter = era_filter[era_filter['ruler_id'] == combo['ruler_id']]
-                        else:
-                            # Conflict - trust era_id, filter by era's actual ruler_id
-                            era_filter = era_filter[era_filter['ruler_id'] == era_actual_ruler_id]
+                        era_filter = era_filter[era_filter['ruler_id'] == combo['ruler_id']]
                     
-                    # Filter by dyn_id only if it matches era's actual dyn_id (or if no conflict)
+                    # Filter by dyn_id if specified (with part_of relationships)
                     if combo['dyn_id'] is not None:
-                        if not dyn_conflicts:
-                            # Handle part_of relationships for dynasty
-                            matched_dyn_ids = [combo['dyn_id']]
-                            if 'part_of' in dyn_df.columns:
-                                # Find dynasties that have this as part_of
-                                part_of_dyns = dyn_df[dyn_df['part_of'] == combo['dyn_id']]['dyn_id'].tolist()
-                                matched_dyn_ids.extend(part_of_dyns)
-                                # Also include the part_of value if it exists
-                                part_of_value = dyn_df[dyn_df['dyn_id'] == combo['dyn_id']]['part_of'].values
-                                if len(part_of_value) > 0 and pd.notna(part_of_value[0]):
-                                    matched_dyn_ids.append(part_of_value[0])
-                                matched_dyn_ids = list(set(matched_dyn_ids))  # Remove duplicates
-                            era_filter = era_filter[era_filter['dyn_id'].isin(matched_dyn_ids)]
-                        else:
-                            # Conflict - trust era_id, filter by era's actual dyn_id
-                            if era_actual_dyn_id is not None and pd.notna(era_actual_dyn_id):
-                                era_filter = era_filter[era_filter['dyn_id'] == era_actual_dyn_id]
+                        # Handle part_of relationships for dynasty
+                        matched_dyn_ids = [combo['dyn_id']]
+                        if 'part_of' in dyn_df.columns:
+                            # Find dynasties that have this as part_of
+                            part_of_dyns = dyn_df[dyn_df['part_of'] == combo['dyn_id']]['dyn_id'].tolist()
+                            matched_dyn_ids.extend(part_of_dyns)
+                            # Also include the part_of value if it exists
+                            part_of_value = dyn_df[dyn_df['dyn_id'] == combo['dyn_id']]['part_of'].values
+                            if len(part_of_value) > 0 and pd.notna(part_of_value[0]):
+                                matched_dyn_ids.append(part_of_value[0])
+                            matched_dyn_ids = list(set(matched_dyn_ids))  # Remove duplicates
+                        era_filter = era_filter[era_filter['dyn_id'].isin(matched_dyn_ids)]
             else:
                 # No era_id specified, apply normal filtering logic
                 # Filter by ruler_id if specified (this enforces that era belongs to this ruler)
@@ -1085,7 +1058,9 @@ def add_can_names_bulk(table, ruler_can_names, dyn_df):
     return out
 
 
-def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, sequential=True, proliferate=False):
+def extract_date_table_bulk(
+    xml_root, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, 
+    sequential=True, proliferate=False, attributes=False, post_normalisation_func=None):
     """
     Optimized bulk version of extract_date_table using pandas operations.
     
@@ -1095,7 +1070,6 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
     3. Sequential constraint solving per date (preserving implied state)
     
     :param xml_root: ElementTree element, XML root containing date elements
-    :param df: Optional DataFrame, pre-extracted date table. If None, will extract using dates_xml_to_df()
     :param implied: Optional dict, implied state for sequential processing. If None, will be initialized with defaults
     :param pg: bool, proleptic gregorian flag
     :param gs: list, gregorian start date [YYYY, MM, DD]
@@ -1122,40 +1096,62 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
     else:
         phrase_dic = phrase_dic_fr
     
+    if implied is None:
+        implied = {
+            'cal_stream_ls': [],
+            'dyn_id_ls': [],
+            'ruler_id_ls': [],
+            'era_id_ls': [],
+            'year': None,
+            'month': None,
+            'intercalary': None,
+            'sex_year': None
+        }
+
+    # Handle both string and Element inputs
+    if isinstance(xml_root, str):
+        xml_root = et.fromstring(xml_root)
+    
     # Step 1: Extract table  DPM: Moved to outer scope
-    # df = dates_xml_to_df(xml_root, attributes=False)
+    df = dates_xml_to_df(xml_root, attributes=attributes)  # TODO True for XML reading
 
     if df.empty:
         output_df = df
     else:
-        # TODO start debugging full and partial attribute column cases from here.
         # Step 2: Normalize date fields (convert strings to numbers)  DPM: ready for outer scope
         df = normalise_date_fields(df)
-        
+
         # Save copy before resolution to check which IDs were explicit attributes vs resolved from strings
         df_before_resolution = df.copy()
         
-        # Step 3: Load all tables once (or use provided tables)  DPM: ready for outer scope
+        # Step 4: Load all tables once (or use provided tables)  DPM: ready for outer scope
         # Performance optimization: if tables are already loaded, reuse them to avoid copying
         if tables is None:
             tables = prepare_tables(civ=civ)
         era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
         master_table = era_df[['cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'era_start_year', 'era_end_year', 'era_start_jdn', 'era_end_jdn']].copy()
         
-        # Step 4: Bulk resolve IDs (Phase 1)  DPM: to place in outer scope
+        # Step 5: Bulk resolve IDs (Phase 1)  DPM: to place in outer scope
         df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
         df = bulk_resolve_ruler_ids(df, ruler_tag_df)
         df = bulk_resolve_era_ids(df, era_df)
-
-        # Step 5: Bulk generate candidates (Phase 2)  DPM: integrate, to place in outer scope
+        
+        # Save copy after ID resolution but before post_normalisation_func
+        # (for looking up original_rows in the solving loop)
+        df_after_resolution = df.copy()
+        
+        # Step 3: Post-normalisation function
+        # Save date_indices BEFORE post_normalisation_func (in case it filters rows)
+        all_date_indices = sorted(df['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
+        if post_normalisation_func is not None:
+            df = post_normalisation_func(df)
+        
+        # Step 6: Bulk generate candidates (Phase 2)  DPM: integrate, to place in outer scope
         df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
         df_candidates['error_str'] = ""
         
         #############################################################################
         all_results = []
-        
-        # Track all date_index values from original df to ensure none are lost
-        all_date_indices = sorted(df['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
         
         # Track previous date's results to check if it had multiple solved options
         prev_date_idx = None
@@ -1187,8 +1183,9 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
                 continue
             original_row_before = original_rows_before.iloc[0]
             
-            # Get row from df (after resolution) for current state
-            original_rows = df[df['date_index'] == date_idx]
+            # Get row from df_after_resolution (after ID resolution, before post_normalisation_func)
+            # This ensures we have the data even if post_normalisation_func filtered rows
+            original_rows = df_after_resolution[df_after_resolution['date_index'] == date_idx]
             if original_rows.empty:
                 continue
             original_row = original_rows.iloc[0]
@@ -1226,6 +1223,7 @@ def extract_date_table_bulk(xml_root, df=None, implied=None, pg=False, gs=None, 
 
             g = df_candidates[df_candidates['date_index'] == date_idx].copy()
             no_candidates_generated = False
+
             if g.empty:
                 # If no candidates were generated, create a fallback row from original df TODO verify this
                 if not original_rows.empty:

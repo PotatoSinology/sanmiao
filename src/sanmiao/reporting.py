@@ -24,6 +24,12 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
     if output_df.empty:
         return f'{phrase_dic["ui"]}: {phrase_dic["unknown-date"]}\n{phrase_dic["matches"]}:\n{phrase_dic["no-matches"]}'
 
+    # Add missing columns with NaN values (so they can be used in boolean operations)
+    cols = ["dyn_name", "ruler_name", "era_name", "year", "sex_year", "month", "intercalary", "day", "gz", "lp", "nmd_gz"]
+    for col in cols:
+        if col not in output_df.columns:
+            output_df[col] = pd.NA
+    
     # Check if any rows have resolved historical entities (dyn_id, ruler_id, or era_id)
     has_resolved_entities = (
         ('dyn_id' in output_df.columns and output_df['dyn_id'].notna().any()) or
@@ -74,7 +80,7 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
 
     # Day strings
     df["day_str"] = ""
-    d = (df["day"].notna()) & (df.get("lp", 0) != 0)
+    d = (df["day"].notna()) & (df["lp"] != 0)
     df.loc[d, "day_str"] = df.loc[d & df["day"].notna(), "day"].astype(int).map(lambda x: str(numcon(x)) + "日")
 
     # Sexagenary day
@@ -108,7 +114,7 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
     except Exception:
         # If anything goes wrong with era processing, skip it
         pass
-
+    
     # Lunar month ranges (for month-only dates)
     # Only create lunar range strings if the necessary lunar columns exist
     if all(col in df.columns for col in ["nmd_gz", "ISO_Date_Start", "start_gz", "ISO_Date_End", "end_gz"]):
@@ -268,18 +274,6 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, 
         del lunar_table['era_end_year']
     if not lunar_table.empty:
         lunar_table = lunar_table.sort_values(by=['cal_stream', 'dyn_id'])
-        """
-        Note: where era and ruler start years differ, I sometimes get duplicates:
-
-        ,dyn_id,cal_stream,era_id,ruler_id,era_name,era_start_year,ruler_name,dyn_name,ind_year,year_gz,month,intercalary,nmd_gz,nmd_jdn,hui_jdn,max_day,hui_gz,emp_start_year
-        0,124,3.0,636,15353.0,至正,1341,順帝妥懽帖睦爾,元,1342,19,1,0,10,2211259.5,2211287.5,29.0,辛丑,1333.0
-        1,133,4.0,930,16394.0,興国,1340,後村上天皇,日本,1342,19,1,0,10,2211259.5,2211288.5,30.0,壬寅,1339.0
-        2,133,4.0,939,16398.0,暦応,1338,光明天皇,日本,1342,19,1,0,10,2211259.5,2211288.5,30.0,壬寅,1336.0
-        3,141,8.0,1175,16597.0,後元,1340,忠惠王,高麗,1342,19,1,0,10,2211259.5,2211287.5,29.0,辛丑,1331.0
-        4,141,8.0,1175,16597.0,後元,1340,忠惠王,高麗,1342,19,1,0,10,2211259.5,2211287.5,29.0,辛丑,1340.0
-
-        This merits rethinking, but the following will work for now.
-        """
         lunar_table = lunar_table.drop_duplicates(subset=['era_id'])
         # Create strings
         for index, row in lunar_table.iterrows():

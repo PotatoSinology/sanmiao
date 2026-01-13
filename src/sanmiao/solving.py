@@ -369,7 +369,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
     has_gz = gz is not None and str(gz) != '' and str(gz) != 'nan'
     has_lp = lp is not None and str(lp) != '' and str(lp) != 'nan'
     has_nmd_gz = nmd_gz is not None and str(nmd_gz) != '' and str(nmd_gz) != 'nan'
-    stop_at_month = has_month and not has_day and not has_gz and not has_lp
+    stop_at_month = has_month and not has_day and not has_gz and not has_lp and not has_nmd_gz
     
     # Normalize month to list
     if has_month and month is not None:
@@ -472,11 +472,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         if 'nmd_jdn' in df.columns and 'hui_jdn' in df.columns:
             df['ISO_Date_Start'] = df['nmd_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             df['ISO_Date_End'] = df['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
-            if 'nmd_gz' in df.columns:
-                if not df.dropna(subset=['lunar_nmd_gz']).empty:
-                    df['start_gz'] = df['lunar_nmd_gz'].apply(lambda g: ganshu(g))
-                    # Remove duplicate columns before apply
-                    df['end_gz'] = df.apply(lambda row: ganshu((row['lunar_nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
+            df['nmd_gz'] = df['lunar_nmd_gz']
+            df['start_gz'] = df['lunar_nmd_gz'].apply(lambda g: ganshu(g))
+            # Remove duplicate columns before apply
+            df['end_gz'] = df.apply(lambda row: ganshu((row['lunar_nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
         
         return df, updated_implied
 

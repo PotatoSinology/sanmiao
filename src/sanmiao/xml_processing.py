@@ -65,3 +65,61 @@ def filter_annals(df: pd.DataFrame) -> pd.DataFrame:
                 result_df.loc[month_only_indices[missing_mask], field] = head_row[field]
     
     return result_df
+
+
+def backwards_fill_days(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Forward-fill month and intercalary from month-only dates to day-only dates.
+    
+    For rows that have only day/lp/gz/nmd_gz (no month), fill in the month
+    and intercalary from the most recent row that has a month.
+    """
+    df = df.dropna(subset=['date_index'])
+    df['date_index'] = df['date_index'].astype(int)
+    result_df = df.copy()
+    
+    # Create a lookup table with month and intercalary for each date_index
+    # Only use rows that have 'm' in present_elements (month present)
+    month_rows = result_df[result_df['present_elements'].str.contains('m', na=False)].copy()
+    
+    # Create a complete date_index range
+    all_indices = pd.DataFrame({'date_index': range(0, int(result_df['date_index'].max()) + 1)})
+    
+    # Merge month data and forward-fill
+    month_lookup = month_rows[['date_index', 'month']].copy()
+    if 'intercalary' in month_rows.columns:
+        month_lookup['_intercalary'] = month_rows['intercalary']
+    else:
+        month_lookup['_intercalary'] = None
+    
+    month_lookup = month_lookup.rename(columns={'month': '_month'})
+    month_lookup = all_indices.merge(month_lookup, on='date_index', how='left')
+    month_lookup = month_lookup.fillna(method='ffill')
+    
+    # Merge back to result_df
+    result_df = result_df.merge(month_lookup[['date_index', '_month', '_intercalary']], on='date_index', how='left')
+    
+    # Identify rows that need month filling:
+    # - Don't have 'm' in present_elements (no month)
+    # - But have at least one of: 'd' (day), 'l' (lp), 'g' (gz), 'z' (nmd_gz)
+    needs_month = (
+        ~result_df['present_elements'].str.contains('m', na=False) &
+        (
+            result_df['present_elements'].str.contains('d', na=False) |
+            result_df['present_elements'].str.contains('l', na=False) |
+            result_df['present_elements'].str.contains('g', na=False) |
+            result_df['present_elements'].str.contains('z', na=False)
+        )
+    )
+    
+    # Fill month for rows that need it
+    result_df.loc[needs_month & result_df['_month'].notna(), 'month'] = result_df.loc[needs_month & result_df['_month'].notna(), '_month']
+    
+    # Fill intercalary for rows that need it
+    if 'intercalary' in result_df.columns:
+        result_df.loc[needs_month & result_df['_intercalary'].notna(), 'intercalary'] = result_df.loc[needs_month & result_df['_intercalary'].notna(), '_intercalary']
+    
+    # Drop temporary columns
+    result_df = result_df.drop(columns=['_month', '_intercalary'], errors='ignore')
+    
+    return result_df
