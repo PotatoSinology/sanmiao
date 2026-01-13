@@ -1223,7 +1223,7 @@ def extract_date_table_bulk(
         # Group by date_index and process sequentially [sex_year is fine at this point]
         for date_idx in all_date_indices:
             # Reset implied state for each date if not sequential
-
+            
             # Check if previous date had multiple solved results - if so, reset implied state
             # because we can't reliably carry forward ambiguous information
             if sequential and prev_date_idx is not None and prev_date_results is not None:
@@ -1338,6 +1338,10 @@ def extract_date_table_bulk(
             no_year = not (has_year or has_sex_year)
             no_month = not (has_month or has_intercalary)
             no_day = not (has_day or has_gz or has_lp or has_nmd_gz)
+            if 'era_id' in g.columns:
+                no_era = not g.dropna(subset=['era_id']).empty
+            else:
+                no_era = True
             
             if sequential:
                 if no_year:  # No year but some sort of day
@@ -1365,11 +1369,21 @@ def extract_date_table_bulk(
                         if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
                             g['intercalary'] = implied['intercalary']
                         has_month = True
-            
+                elif no_era and len(implied['era_id_ls']) == 1:
+                    era_id = implied['era_id_ls'][0]
+                    bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
+                    g['cal_stream'] = bloc['cal_stream'].values[0]
+                    g['dyn_id'] = bloc['dyn_id'].values[0]
+                    g['ruler_id'] = bloc['ruler_id'].values[0]
+                    g['era_id'] = era_id
+                    g['era_start_year'] = bloc['era_start_year'].values[0]
+
+                    
             # Check if we have sufficient context for dates with year/month/day constraints
             # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
             has_temporal_constraints = has_year or has_sex_year or has_month or has_day or has_gz or has_lp or has_nmd_gz
             has_context = False
+            
             if has_temporal_constraints and no_candidates_generated:
                 # Check if we have era/dynasty/ruler context (either explicit or from implied, after applying implied)
                 has_era = ('era_id' in g.columns and g['era_id'].notna().any()) or (implied.get('era_id_ls') and len(implied['era_id_ls']) > 0)

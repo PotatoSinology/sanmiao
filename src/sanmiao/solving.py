@@ -497,6 +497,19 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             # Remove duplicate columns before apply
             df['end_gz'] = df.apply(lambda row: ganshu((row['lunar_nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
         
+        # Update implied state with ID lists and month
+        if 'month' in df.columns:
+            month_vals = df['month'].dropna().unique()
+            if len(month_vals) == 1:
+                updated_implied['month'] = int(month_vals[0])
+        
+        imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']
+        for i in imp_ls:
+            if i in df.columns:
+                unique_vals = df.dropna(subset=[i])[i].unique()
+                if len(unique_vals) == 1:
+                    updated_implied.update({f'{i}_ls': list(unique_vals)})
+        
         return df, updated_implied
 
     # Handle combinations of day/gz/lp constraints
