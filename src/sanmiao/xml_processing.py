@@ -1,6 +1,5 @@
 import lxml.etree as et
 import pandas as pd
-from .loaders import prepare_tables
 from .config import DEFAULT_TPQ, DEFAULT_TAQ
 from .bulk_processing import extract_date_table_bulk, dates_xml_to_df
 
@@ -94,7 +93,10 @@ def backwards_fill_days(df: pd.DataFrame) -> pd.DataFrame:
     
     month_lookup = month_lookup.rename(columns={'month': '_month'})
     month_lookup = all_indices.merge(month_lookup, on='date_index', how='left')
-    month_lookup = month_lookup.fillna(method='ffill')
+    # Suppress downcasting warning by opting into future behavior
+    with pd.option_context('future.no_silent_downcasting', True):
+        month_lookup = month_lookup.ffill()
+    month_lookup = month_lookup.infer_objects(copy=False)
     
     # Merge back to result_df
     result_df = result_df.merge(month_lookup[['date_index', '_month', '_intercalary']], on='date_index', how='left')

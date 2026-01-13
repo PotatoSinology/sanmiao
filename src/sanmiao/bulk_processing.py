@@ -679,7 +679,15 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
         # Get ALL rows for this date_index (not just first one)
         # This is important because bulk_resolve_era_ids can expand one date_index
         # into multiple rows with different era_id values
-        date_rows = out[out['date_index'] == date_idx].copy()
+        # Convert date_idx to match the dtype in out['date_index'] for comparison
+        if 'date_index' in out.columns:
+            date_idx_for_filter = pd.to_numeric(date_idx, errors='coerce')
+            if pd.isna(date_idx_for_filter):
+                date_idx_for_filter = date_idx
+            out_date_index_numeric = pd.to_numeric(out['date_index'], errors='coerce')
+            date_rows = out[out_date_index_numeric == date_idx_for_filter].copy()
+        else:
+            date_rows = pd.DataFrame()
         
         # Extract all unique combinations of resolved IDs from these rows
         resolved_combinations = []
@@ -709,8 +717,12 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
         if all_none:
             if not proliferate:
                 first_row = date_rows.iloc[0]
+                # Ensure date_index is numeric
+                date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                if pd.isna(date_idx_numeric):
+                    date_idx_numeric = date_idx
                 candidate_row = {
-                    'date_index': date_idx,
+                    'date_index': date_idx_numeric,
                     'dyn_id': None,
                     'ruler_id': None,
                     'era_id': None,
@@ -790,7 +802,11 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                     t_out['_ind_year'] = t_out['year'] + t_out['era_start_year'] - 1
                     t_out = t_out[t_out['_ind_year'] == t_out['ind_year']]
                     if t_out.empty:
-                        date_rows['date_index'] = date_idx
+                        # Ensure date_index is numeric
+                        date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                        if pd.isna(date_idx_numeric):
+                            date_idx_numeric = date_idx
+                        date_rows['date_index'] = date_idx_numeric
                         if 'error_str' not in date_rows.columns:
                             date_rows['error_str'] = ""
                         date_rows['error_str'] += phrase_dic['year-lun-mismatch']
@@ -803,7 +819,11 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 if not t_out.dropna(subset=['sex_year']).empty:
                     t_out = t_out[t_out['sex_year'] == t_out['year_gz']]
                     if t_out.empty:
-                        date_rows['date_index'] = date_idx
+                        # Ensure date_index is numeric
+                        date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                        if pd.isna(date_idx_numeric):
+                            date_idx_numeric = date_idx
+                        date_rows['date_index'] = date_idx_numeric
                         if 'error_str' not in date_rows.columns:
                             date_rows['error_str'] = ""
                         date_rows['error_str'] += phrase_dic['year-sex-mismatch']
@@ -817,7 +837,11 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 cols = [i for i in cols if i in t_out.columns]
                 date_rows = date_rows.drop(columns=cols)
                 
-                date_rows['date_index'] = date_idx
+                # Ensure date_index is numeric
+                date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                if pd.isna(date_idx_numeric):
+                    date_idx_numeric = date_idx
+                date_rows['date_index'] = date_idx_numeric
 
                 all_candidates.extend(date_rows.to_dict('records'))
         
@@ -839,61 +863,86 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             if (combo['dyn_id'] is not None and
                 combo['ruler_id'] is None and
                 combo['era_id'] is None):
-                # Find dynasty info
-                dyn_info = dyn_df[dyn_df['dyn_id'] == combo['dyn_id']]
-                if not dyn_info.empty:
-                    dyn_row = dyn_info.iloc[0]
-                    # Create candidate using dynasty's reign period
-                    candidate_row = {
-                        'date_index': date_idx,
-                        'dyn_id': combo['dyn_id'],
-                        'ruler_id': None,  # No specific ruler
-                        'era_id': None,  # No specific era
-                        'cal_stream': dyn_row['cal_stream'],
-                        'era_start_year': dyn_row['dyn_start_year'],
-                        'era_end_year': dyn_row['dyn_end_year'],
-                        'max_year': None,  # Dynasty doesn't have max_year
-                        'era_name': None,  # No era name for dynasty-only
-                    }
-                    # Copy ALL date fields to preserve month, intercalary, day, etc.
-                    for col in date_rows.columns:
-                        if col not in candidate_row and col != 'date_index':
-                            candidate_row[col] = combo['source_row'].get(col)
-                    all_candidates.append(candidate_row)
+                # Find dynasty info - pandas handles int/float comparison automatically
+                # But ensure we're comparing like types by converting both sides
+                dyn_id_val = combo['dyn_id']
+                if pd.notna(dyn_id_val):
+                    # Convert to float for consistent comparison (handles both int and float input)
+                    dyn_id_val = float(dyn_id_val)
+                    
+                    # Compare: convert dyn_df['dyn_id'] to float for comparison (NaN-safe)
+                    dyn_df_numeric = pd.to_numeric(dyn_df['dyn_id'], errors='coerce')
+                    dyn_info = dyn_df[dyn_df_numeric == dyn_id_val]
+                    
+                    if not dyn_info.empty:
+                        dyn_row = dyn_info.iloc[0]
+                        # Create candidate using dynasty's reign period
+                        # Use .get() to safely handle missing columns or NaN values
+                        # Ensure date_index is numeric for consistent comparison
+                        date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                        if pd.isna(date_idx_numeric):
+                            date_idx_numeric = date_idx
+                        candidate_row = {
+                            'date_index': date_idx_numeric,
+                            'dyn_id': dyn_id_val,  # Store as float for consistency
+                            'ruler_id': None,  # No specific ruler
+                            'era_id': None,  # No specific era
+                            'cal_stream': dyn_row.get('cal_stream'),
+                            'era_start_year': dyn_row.get('dyn_start_year'),
+                            'era_end_year': dyn_row.get('dyn_end_year'),
+                            'max_year': None,  # Dynasty doesn't have max_year
+                            'era_name': None,  # No era name for dynasty-only
+                        }
+                        # Copy ALL date fields to preserve month, intercalary, day, etc.
+                        # But don't overwrite dyn_id, ruler_id, era_id we just set
+                        protected_cols = {'dyn_id', 'ruler_id', 'era_id', 'date_index'}
+                        for col in date_rows.columns:
+                            if col not in candidate_row and col not in protected_cols:
+                                candidate_row[col] = combo['source_row'].get(col)
+                                all_candidates.append(candidate_row)
                 continue  # Skip the normal era-based logic
 
             # Special case: ruler specified but no era - use ruler's reign period
             if (combo['ruler_id'] is not None and
                 combo['era_id'] is None):
-                # Find ruler info
-                ruler_info = ruler_df[ruler_df['person_id'] == combo['ruler_id']]
-                if not ruler_info.empty:
-                    ruler_row = ruler_info.iloc[0]
+                # Find ruler info - convert to same type for comparison
+                ruler_id_val = int(combo['ruler_id']) if pd.notna(combo['ruler_id']) else None
+                if ruler_id_val is not None:
+                    # Ensure ruler_df['person_id'] is comparable (convert to int if needed)
+                    ruler_info = ruler_df[ruler_df['person_id'].astype(int) == ruler_id_val]
+                    if not ruler_info.empty:
+                        ruler_row = ruler_info.iloc[0]
 
-                    # When both dynasty and ruler are specified, filter by dynasty
-                    # If combo has a dyn_id that doesn't match the ruler's actual dynasty, skip this ruler
-                    if combo['dyn_id'] is not None and pd.notna(ruler_row.get('dyn_id')):
-                        if int(combo['dyn_id']) != int(ruler_row['dyn_id']):
-                            # Dynasty mismatch: skip this ruler (don't include in candidates)
-                            continue
+                        # When both dynasty and ruler are specified, filter by dynasty
+                        # If combo has a dyn_id that doesn't match the ruler's actual dynasty, skip this ruler
+                        if combo['dyn_id'] is not None and pd.notna(ruler_row.get('dyn_id')):
+                            if int(combo['dyn_id']) != int(ruler_row['dyn_id']):
+                                # Dynasty mismatch: skip this ruler (don't include in candidates)
+                                continue
 
-                    # Create candidate using ruler's reign period
-                    candidate_row = {
-                        'date_index': date_idx,
-                        'dyn_id': ruler_row['dyn_id'],  # Use ruler's actual dynasty
-                        'ruler_id': combo['ruler_id'],
-                        'era_id': None,  # No specific era
-                        'cal_stream': ruler_row['cal_stream'],
-                        'era_start_year': ruler_row['emp_start_year'],
-                        'era_end_year': ruler_row['emp_end_year'],
-                        'max_year': ruler_row['max_year'],
-                        'era_name': None,  # No era name for ruler-only
-                    }
-                    # Copy ALL date fields to preserve month, intercalary, day, etc.
-                    for col in date_rows.columns:
-                        if col not in candidate_row and col != 'date_index':
-                            candidate_row[col] = combo['source_row'].get(col)
-                    all_candidates.append(candidate_row)
+                        # Create candidate using ruler's reign period
+                        # Ensure date_index is numeric for consistent comparison
+                        date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                        if pd.isna(date_idx_numeric):
+                            date_idx_numeric = date_idx
+                        candidate_row = {
+                            'date_index': date_idx_numeric,
+                            'dyn_id': ruler_row['dyn_id'],  # Use ruler's actual dynasty
+                            'ruler_id': ruler_id_val,
+                            'era_id': None,  # No specific era
+                            'cal_stream': ruler_row.get('cal_stream'),
+                            'era_start_year': ruler_row.get('emp_start_year'),
+                            'era_end_year': ruler_row.get('emp_end_year'),
+                            'max_year': ruler_row.get('max_year'),
+                            'era_name': None,  # No era name for ruler-only
+                        }
+                        # Copy ALL date fields to preserve month, intercalary, day, etc.
+                        # But don't overwrite dyn_id, ruler_id, era_id we just set
+                        protected_cols = {'dyn_id', 'ruler_id', 'era_id', 'date_index'}
+                        for col in date_rows.columns:
+                            if col not in candidate_row and col not in protected_cols:
+                                candidate_row[col] = combo['source_row'].get(col)
+                        all_candidates.append(candidate_row)
                 continue  # Skip the normal era-based logic
 
             # Build filter for era_df based on this combination
@@ -960,8 +1009,12 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                         seen_combinations.add(combo_key)
                         
                         # Create candidate row with validated IDs from era_df
+                        # Ensure date_index is numeric
+                        date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                        if pd.isna(date_idx_numeric):
+                            date_idx_numeric = date_idx
                         candidate_row = {
-                            'date_index': date_idx,
+                            'date_index': date_idx_numeric,
                             'era_id': era_row['era_id'],
                             'ruler_id': era_row['ruler_id'],
                             'dyn_id': era_row['dyn_id'],
@@ -984,8 +1037,12 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
         # but preserve all date information (month, day, etc.)
         if not valid_candidates:
             first_row = date_rows.iloc[0]
+            # Ensure date_index is numeric
+            date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+            if pd.isna(date_idx_numeric):
+                date_idx_numeric = date_idx
             candidate_row = {
-                'date_index': date_idx,
+                'date_index': date_idx_numeric,
                 'dyn_id': None,
                 'ruler_id': None,
                 'era_id': None,
@@ -1142,7 +1199,13 @@ def extract_date_table_bulk(
         
         # Step 3: Post-normalisation function
         # Save date_indices BEFORE post_normalisation_func (in case it filters rows)
-        all_date_indices = sorted(df['date_index'].dropna().unique(), key=lambda x: int(x) if str(x).isdigit() else 0)
+        # Ensure date_indices are numeric for consistent comparison later
+        date_indices_raw = df['date_index'].dropna().unique()
+        all_date_indices = sorted([pd.to_numeric(x, errors='coerce') if not isinstance(x, (int, float, np.integer, np.floating)) else x 
+                                   for x in date_indices_raw], 
+                                  key=lambda x: float(x) if pd.notna(x) else 0)
+        # Remove any NaN values that resulted from failed conversions
+        all_date_indices = [x for x in all_date_indices if pd.notna(x)]
         if post_normalisation_func is not None:
             df = post_normalisation_func(df)
         
@@ -1178,14 +1241,28 @@ def extract_date_table_bulk(
             
             # Get original row from df_before_resolution to check for explicit attributes
             # (before string resolution, so we can distinguish attributes from resolved values)
-            original_rows_before = df_before_resolution[df_before_resolution['date_index'] == date_idx]
+            # Convert date_idx for comparison (handle type mismatch)
+            if 'date_index' in df_before_resolution.columns:
+                date_idx_for_compare = pd.to_numeric(date_idx, errors='coerce')
+                if pd.isna(date_idx_for_compare):
+                    date_idx_for_compare = date_idx
+                original_rows_before = df_before_resolution[pd.to_numeric(df_before_resolution['date_index'], errors='coerce') == date_idx_for_compare]
+            else:
+                original_rows_before = pd.DataFrame()
             if original_rows_before.empty:
                 continue
             original_row_before = original_rows_before.iloc[0]
             
             # Get row from df_after_resolution (after ID resolution, before post_normalisation_func)
             # This ensures we have the data even if post_normalisation_func filtered rows
-            original_rows = df_after_resolution[df_after_resolution['date_index'] == date_idx]
+            # Convert date_idx for comparison (handle type mismatch)
+            if 'date_index' in df_after_resolution.columns:
+                date_idx_for_compare = pd.to_numeric(date_idx, errors='coerce')
+                if pd.isna(date_idx_for_compare):
+                    date_idx_for_compare = date_idx
+                original_rows = df_after_resolution[pd.to_numeric(df_after_resolution['date_index'], errors='coerce') == date_idx_for_compare]
+            else:
+                original_rows = pd.DataFrame()
             if original_rows.empty:
                 continue
             original_row = original_rows.iloc[0]
@@ -1221,7 +1298,18 @@ def extract_date_table_bulk(
                 elif has_explicit_dynasty and explicit_dyn_id is not None:
                     reset_implied_state_for_dynasty(implied, explicit_dyn_id, dyn_df)
 
-            g = df_candidates[df_candidates['date_index'] == date_idx].copy()
+            # Convert date_idx to match df_candidates['date_index'] dtype for proper comparison
+            # This handles cases where date_idx is a string but date_index column is numeric
+            if not df_candidates.empty and 'date_index' in df_candidates.columns:
+                # Convert date_idx to numeric to match the column dtype
+                date_idx_converted = pd.to_numeric(date_idx, errors='coerce')
+                if pd.isna(date_idx_converted):
+                    # If conversion fails, try direct comparison (fallback)
+                    date_idx_converted = date_idx
+                comparison_result = df_candidates['date_index'] == date_idx_converted
+                g = df_candidates[comparison_result].copy()
+            else:
+                g = df_candidates[df_candidates['date_index'] == date_idx].copy()
             no_candidates_generated = False
 
             if g.empty:
