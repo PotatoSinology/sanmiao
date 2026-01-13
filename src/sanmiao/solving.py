@@ -473,6 +473,10 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
             df['ISO_Date_Start'] = df['nmd_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             df['ISO_Date_End'] = df['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             df['nmd_gz'] = df['lunar_nmd_gz']
+        # TODO debug to understand why this is needed
+        temp = df.dropna(subset=['lunar_nmd_gz'])
+        if not temp.empty:
+            df = temp
             df['start_gz'] = df['lunar_nmd_gz'].apply(lambda g: ganshu(g))
             # Remove duplicate columns before apply
             df['end_gz'] = df.apply(lambda row: ganshu((row['lunar_nmd_gz'] + row['max_day'] - 2) % 60 + 1), axis=1)
