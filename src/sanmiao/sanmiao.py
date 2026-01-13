@@ -129,13 +129,10 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Load calendar tables
                 tables = prepare_tables(civ=civ)
                 
-                # Extract date table from XML (moved from extract_date_table_bulk)
-                df = dates_xml_to_df(xml_root, attributes=False)
-                
                 # Extract dates using optimized bulk function
                 xml_string, output_df, implied = extract_date_table_bulk(
-                    xml_root, df=df, implied=implied, pg=pg, gs=gs, lang=lang,
-                    tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
+                    xml_root, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, 
+                    civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
                 )
 
                 # Extract tables for canonical name addition

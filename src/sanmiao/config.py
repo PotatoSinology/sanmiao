@@ -47,7 +47,7 @@ phrase_dic_fr = {
     'year-sex-mismatch': 'Incompatibilité année-annéeSex.',
     'dyn-rul-era-mismatch': 'Incompatibilité dyn-souv-ère ; ',
     'year-month-mismatch': 'incompatibilité année-mois ; ',
-    'year-int-month-mismatch': 'Incompatibilité année-moisInt. ; ',
+    'year-int-month-mismatch': 'Incompatibilité année-intercal. ; ',
     'lp-gz-day-mismatch': 'Incompatibilité phaseLun.-jour-jourSex. ; ',
     'lp-gz-nmdgz-mismatch': 'Incompatibilité phaseLun.-jourSex.-NLjourSex. ; ',
     'lp-gz-mismatch': 'Incompatibilité phaseLun.-jourSex. ; ',
