@@ -468,11 +468,27 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
     # Handle stop_at_month case (month only, no day/gz/lp)
     if stop_at_month:
         df = preference_filtering_bulk(df, updated_implied)
+
+        # Handle case where intercalary is NULL but lunar table has both intercalary=0 and 1
+        if intercalary is None and 'lunar_intercalary' in df.columns:
+            df_copy = df.copy()
+            # Try filling intercalary with 0 and filter where they match
+            df['temp_intercalary'] = 0
+            filtered_df = df[df['temp_intercalary'] == df['lunar_intercalary']].copy()
+            if not filtered_df.empty:
+                df = filtered_df
+            else:
+                df = df_copy
+            # Clean up temp column
+            if 'temp_intercalary' in df.columns:
+                df = df.drop('temp_intercalary', axis=1)
+
         # Generate date ranges
         if 'nmd_jdn' in df.columns and 'hui_jdn' in df.columns:
             df['ISO_Date_Start'] = df['nmd_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             df['ISO_Date_End'] = df['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
             df['nmd_gz'] = df['lunar_nmd_gz']
+        
         # TODO debug to understand why this is needed
         temp = df.dropna(subset=['lunar_nmd_gz'])
         if not temp.empty:
