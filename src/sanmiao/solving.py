@@ -47,15 +47,8 @@ def preference_filtering_bulk(table, implied):
             table = bu.copy()
         else:
             bu = table.copy()
-
-    # Filter by implied cal_stream list
-    cal_stream_ls = implied.get('cal_stream_ls', [])
-    if 'cal_stream' in table.columns and len(cal_stream_ls) > 0:
-        table = table[table['cal_stream'].isin(cal_stream_ls)]
-        if table.empty:
-            table = bu.copy()
-        else:
-            bu = table.copy()
+    
+    # DO NOT filter by implied cal_stream list
 
     # Filter by implied month
     mn = implied.get('month')
@@ -162,7 +155,7 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
         return pd.DataFrame(), "", implied.copy()
 
     df = g.copy()
-
+    
     # Initialize updated_implied to avoid UnboundLocalError
     updated_implied = implied.copy()
 
@@ -179,7 +172,7 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
         sex_year_vals = df['sex_year'].dropna().unique()
         if len(sex_year_vals) > 0:
             sex_year = int(sex_year_vals[0])
-    
+
     # Handle numeric year constraint
     if year is not None:
         # If dataframe has no era information (all NaN), populate with implied era
@@ -790,7 +783,7 @@ def add_jdn_and_iso_to_proliferate_candidates(df, pg=False, gs=None):
         return df
     
     df = df.copy()
-    print(df['day'])
+    
     # Calculate day if missing
     if 'day' not in df.columns or df['day'].isna().all():
         if 'lp' in df.columns and (df['lp'] == -1).any():

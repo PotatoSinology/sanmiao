@@ -1220,7 +1220,7 @@ def extract_date_table_bulk(
         df = bulk_resolve_era_ids(df, era_df)
         # Save copy after ID resolution but before post_normalisation_func
         df_after_resolution = df.copy()
-
+        
         # Step 3: Post-normalisation function
         # Save date_indices BEFORE post_normalisation_func (in case it filters rows)
         # Ensure date_indices are numeric for consistent comparison later
@@ -1405,7 +1405,7 @@ def extract_date_table_bulk(
                     g['era_id'] = era_id
                     g['era_start_year'] = bloc['era_start_year'].values[0]
                 """
-                    
+
             # Check if we have sufficient context for dates with year/month/day constraints
             # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
             has_temporal_constraints = has_year or has_sex_year or has_month or has_day or has_gz or has_lp or has_nmd_gz
@@ -1469,20 +1469,21 @@ def extract_date_table_bulk(
                 # Add JDN and ISO dates to proliferate candidates
                 if not result_df_b.empty:
                     result_df_b = add_jdn_and_iso_to_proliferate_candidates(result_df_b, pg=pg, gs=gs)
-                result_df = pd.concat([i for i in [result_df_a, result_df_b] if not i.empty])
-                del g_a, result_df_a, result_df_b
+                to_concat = [i for i in [result_df_a, result_df_b] if not i.empty]
                 
                 # If lunar constraints resulted in no matches (likely due to corruption),
                 # use the original input dataframe instead of empty
-                if result_df.empty:
+                if len(to_concat) == 0:
                     result_df = g.copy()
                     phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
                     result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
-
-                # Add metadata to result_df if not empty
-                if not result_df.empty:
+                else:
+                    result_df = pd.concat(to_concat)
+                    # Add metadata to result_df if not empty
                     if 'cal_stream' in result_df.columns and 'ind_year' in result_df.columns:
                         result_df = result_df.sort_values(by=['cal_stream', 'ind_year'])
+                del g_a, result_df_a, result_df_b
+                    
             else:
                 # Year-only date (no month/day constraints)
                 result_df, implied = solve_date_with_year(
