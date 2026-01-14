@@ -106,6 +106,25 @@ def sanitize_gs(gs):
     except (ValueError, TypeError):
         return DEFAULT_GREGORIAN_START
 
+
+def normalize_defaults(gs=None, civ=None):
+    """
+    Normalize gs and civ parameters to their default values if None.
+    Also sanitizes gs to ensure it's valid (returns default if invalid).
+    
+    :param gs: Gregorian start date (list or None)
+    :param civ: Civilization code(s) (str, list, or None)
+    :return: tuple (gs, civ) with defaults applied and gs sanitized
+    """
+    if gs is None:
+        gs = DEFAULT_GREGORIAN_START
+    else:
+        # Sanitize gs to ensure it's valid, even if provided
+        gs = sanitize_gs(gs)
+    if civ is None:
+        civ = ['c', 'j', 'k']
+    return gs, civ
+
 # Define terms for conversion below
 SEASON_DIC = {'春': 1, '夏': 2, '秋': 3, '冬': 4}
 LP_DIC = {'朔': 0, '晦': -1}
