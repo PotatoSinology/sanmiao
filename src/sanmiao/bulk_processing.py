@@ -3,16 +3,17 @@ import numpy as np
 import pandas as pd
 import lxml.etree as et
 from .config import (
-    DEFAULT_TPQ, DEFAULT_TAQ, DEFAULT_GREGORIAN_START, LP_DIC,
+    DEFAULT_TPQ, DEFAULT_TAQ, LP_DIC,
     phrase_dic_en, phrase_dic_fr,
 )
 from .converters import (
     numcon, ganshu
 )
 from .loaders import prepare_tables
-from .config import get_cal_streams_from_civ, LP_DIC
+from .config import get_cal_streams_from_civ, LP_DIC, normalize_defaults
 from .solving import (
-    solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints
+    solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints,
+    add_jdn_and_iso_to_proliferate_candidates
 )
 
 # Helper functions to reduce redundancy
@@ -186,10 +187,7 @@ def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ
     :return: tuple (xml_string, report, output_df)
     """
     # Defaults
-    if gs is None:
-        gs = DEFAULT_GREGORIAN_START
-    if civ is None:
-        civ = ['c', 'j', 'k']
+    gs, civ = normalize_defaults(gs, civ)
     
     # Use the optimized bulk function (delegates to extract_date_table_bulk)
     return extract_date_table_bulk(
@@ -223,7 +221,7 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
     for node in xml_root.xpath(date_xpath, namespaces=ns):
         # Always extract date_index and date_string
         row = {
-            "date_index": node.attrib.get("index"),
+            "date_index": int(node.attrib.get("index")),
             "date_string": node.xpath("normalize-space(string())", namespaces=ns) if node.xpath("normalize-space(string())", namespaces=ns) else "",
         }
         
@@ -245,6 +243,10 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
             "nmd_gz_str": get1(".//tei:nmd_gz" if ns else ".//nmdgz"),
             "has_int": 1 if node.xpath(".//tei:int" if ns else ".//int", namespaces=ns) else 0,
         })
+        
+        # If we have gz and lp = 0, also set nmd_gz to equal gz
+        if row.get("gz_str") and row.get("lp_str") == "朔" and not row.get("nmd_gz_str"):
+            row["nmd_gz_str"] = row["gz_str"]
 
         # If attributes=True, also extract attributes from <date> element
         # Attributes will take precedence over child elements during normalization
@@ -404,7 +406,7 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
         out.loc[mask_no_attr, "nmd_gz"] = out.loc[mask_no_attr, "nmd_gz_str"].map(
             lambda s: ganshu(s) if isinstance(s, str) and s else None
         )
-
+    
     # intercalary - only process has_int if attribute doesn't exist or is NaN for that row
     if 'intercalary' not in out.columns:
         out['intercalary'] = None
@@ -704,7 +706,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 'era_id': era_id,
                 'source_row': row
             })
-        
+        date_rows['lunar_solution'] = 1
         # Skip if ALL IDs are None (no identifiers specified)
         # Don't generate candidates for every possible era
         all_none = all(
@@ -713,7 +715,6 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             combo['era_id'] is None
             for combo in resolved_combinations
         )
-        
         if all_none:
             if not proliferate:
                 first_row = date_rows.iloc[0]
@@ -731,7 +732,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                     if col not in candidate_row and col != 'date_index':
                         candidate_row[col] = first_row.get(col)
                 all_candidates.append(candidate_row)
-            else:
+            else:  # If proliferate is True
                 t_out = date_rows.copy()
                 # Copy lunar table
                 t_lt = lunar_table.copy()
@@ -761,6 +762,16 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 f = c.merge(t_lt, on=['intercalary'], how='left')
                 t_out = pd.concat([d, e, f])
                 
+                # Separate into those with and without new moon sex. date (nmd_gz_x)
+                a = t_out.copy().dropna(subset=['nmd_gz_x'])  # nmd_gz from text
+                b = t_out[~t_out.index.isin(a.index)].copy()  # nmd_gz to take from lunar table
+                # Filter those with to those matching the lunar table
+                a = a[a['nmd_gz_x'] == a['nmd_gz_y']]
+                b['nmd_gz_x'] = b['nmd_gz_y']
+                t_out = pd.concat([i for i in [a, b] if not i.empty])
+                t_out = t_out.drop(columns=['nmd_gz_y'])
+                t_out = t_out.rename(columns={'nmd_gz_x': 'nmd_gz'})
+
                 if not t_out.dropna(subset=['lp']).empty:  # If there is a lunar phase constraint
                     # If there is a sexagenary day constraint
                     if not t_out.dropna(subset=['gz']).empty:
@@ -768,11 +779,13 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                             t_out = t_out[t_out['gz'] == t_out['hui_gz']]
                         else:  # 朔
                             t_out = t_out[t_out['gz'] == t_out['nmd_gz']]
+                    
                     # Add day column
                     if t_out['lp'].iloc[0] == -1:  # 晦
                         t_out['day'] = t_out['max_day']
                     else:  # 朔
                         t_out['day'] = 1
+                
                 else:  # If there is no lunar phase constraint
                     if not t_out.dropna(subset=['gz']).empty:  # If there is a sexagenary day constraint
                         t_out['_day'] = ((t_out['gz'] - t_out['nmd_gz']) % 60) + 1
@@ -788,8 +801,11 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 cols = ['max_day', 'hui_gz']
                 t_out = t_out.drop(columns=cols)
                 
+                # Filter master table
+                temp = master_table.copy()
+                temp = temp[(temp['era_end_year'] >= tpq) & (temp['era_start_year'] <= taq)]
                 # Merge with master table
-                t_out = t_out.merge(master_table, on=['cal_stream'], how='left')
+                t_out = t_out.merge(temp, on=['cal_stream'], how='left')
                 
                 # Filter by lunar table ind_year
                 t_out = t_out[
@@ -801,6 +817,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 if not t_out.dropna(subset=['year']).empty:
                     t_out['_ind_year'] = t_out['year'] + t_out['era_start_year'] - 1
                     t_out = t_out[t_out['_ind_year'] == t_out['ind_year']]
+                    
                     if t_out.empty:
                         # Ensure date_index is numeric
                         date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
@@ -833,9 +850,12 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 date_rows = t_out
                 
                 # Clean columns
-                cols = ['_ind_year', 'nmd_gz', 'nmd_jdn', 'hui_jdn', 'ind_year']
+                cols = ['_ind_year']  #
                 cols = [i for i in cols if i in t_out.columns]
                 date_rows = date_rows.drop(columns=cols)
+
+                # Add marker to disable lunar solution processing
+                date_rows['lunar_solution'] = 0
                 
                 # Ensure date_index is numeric
                 date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
@@ -851,7 +871,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
         # Filter these combinations against the loaded tables to find valid ones
         valid_candidates = []
         seen_combinations = set()
-
+        
         for combo in resolved_combinations:
             # Skip combinations with no IDs
             if (combo['dyn_id'] is None and
@@ -1087,14 +1107,15 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     return candidates_df.drop_duplicates().reset_index(drop=True)
 
 
-def add_can_names_bulk(table, ruler_can_names, dyn_df):
+def add_can_names_bulk(table, ruler_can_names, dyn_df, era_df=None):
     """
-    Add canonical names (dyn_name, ruler_name) to candidate DataFrame.
+    Add canonical names (dyn_name, ruler_name, era_name) to candidate DataFrame.
     
-    :param table: DataFrame with ruler_id and/or dyn_id columns
+    :param table: DataFrame with ruler_id, dyn_id, and/or era_id columns
     :param ruler_can_names: DataFrame with ['person_id', 'string'] columns
     :param dyn_df: DataFrame with ['dyn_id', 'dyn_name'] columns
-    :return: DataFrame with added 'ruler_name' and 'dyn_name' columns
+    :param era_df: Optional DataFrame with ['era_id', 'era_name'] columns
+    :return: DataFrame with added 'ruler_name', 'dyn_name', and 'era_name' columns
     """
     out = table.copy()
     
@@ -1111,6 +1132,13 @@ def add_can_names_bulk(table, ruler_can_names, dyn_df):
         out = out.merge(dyn_map, how='left', on='dyn_id')
     else:
         out['dyn_name'] = None
+    
+    # Add era names
+    if era_df is not None and 'era_id' in out.columns:
+        era_map = era_df[['era_id', 'era_name']].drop_duplicates()
+        out = out.merge(era_map, how='left', on='era_id')
+    else:
+        out['era_name'] = None
     
     return out
 
@@ -1141,11 +1169,8 @@ def extract_date_table_bulk(
     :param attributes: bool, if True, extract attributes from <date> elements when df is None
     :return: tuple (xml_string, output_df, implied) - same format as extract_date_table()
     """
-    # Defaults  DPM: already in outer scope
-    if gs is None:
-        gs = DEFAULT_GREGORIAN_START
-    if civ is None:
-        civ = ['c', 'j', 'k']
+    # Defaults
+    gs, civ = normalize_defaults(gs, civ)
     
     # DPM: set in new inner scope
     if lang == 'en':
@@ -1170,8 +1195,10 @@ def extract_date_table_bulk(
         xml_root = et.fromstring(xml_root)
     
     # Step 1: Extract table  DPM: Moved to outer scope
-    df = dates_xml_to_df(xml_root, attributes=attributes)  # TODO True for XML reading
+    df = dates_xml_to_df(xml_root, attributes=attributes)
 
+    df['lunar_solution'] = 1
+    
     if df.empty:
         output_df = df
     else:
@@ -1181,22 +1208,19 @@ def extract_date_table_bulk(
         # Save copy before resolution to check which IDs were explicit attributes vs resolved from strings
         df_before_resolution = df.copy()
         
-        # Step 4: Load all tables once (or use provided tables)  DPM: ready for outer scope
-        # Performance optimization: if tables are already loaded, reuse them to avoid copying
+        # Step 4: Load all tables once (or use provided tables)  
         if tables is None:
             tables = prepare_tables(civ=civ)
         era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
         master_table = era_df[['cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'era_start_year', 'era_end_year', 'era_start_jdn', 'era_end_jdn']].copy()
         
-        # Step 5: Bulk resolve IDs (Phase 1)  DPM: to place in outer scope
+        # Step 5: Bulk resolve IDs (Phase 1)
         df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
         df = bulk_resolve_ruler_ids(df, ruler_tag_df)
         df = bulk_resolve_era_ids(df, era_df)
-        
         # Save copy after ID resolution but before post_normalisation_func
-        # (for looking up original_rows in the solving loop)
         df_after_resolution = df.copy()
-        
+
         # Step 3: Post-normalisation function
         # Save date_indices BEFORE post_normalisation_func (in case it filters rows)
         # Ensure date_indices are numeric for consistent comparison later
@@ -1209,7 +1233,7 @@ def extract_date_table_bulk(
         if post_normalisation_func is not None:
             df = post_normalisation_func(df)
         
-        # Step 6: Bulk generate candidates (Phase 2)  DPM: integrate, to place in outer scope
+        # Step 6: Bulk generate candidates (Phase 2)
         df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
         df_candidates['error_str'] = ""
         
@@ -1338,8 +1362,9 @@ def extract_date_table_bulk(
             no_year = not (has_year or has_sex_year)
             no_month = not (has_month or has_intercalary)
             no_day = not (has_day or has_gz or has_lp or has_nmd_gz)
+            
             if 'era_id' in g.columns:
-                no_era = not g.dropna(subset=['era_id']).empty
+                no_era = g.dropna(subset=['era_id']).empty
             else:
                 no_era = True
             
@@ -1369,6 +1394,8 @@ def extract_date_table_bulk(
                         if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
                             g['intercalary'] = implied['intercalary']
                         has_month = True
+                """
+                # NOTE: These implied values are applied elsewhere. Adding this here is a mistake.
                 elif no_era and len(implied['era_id_ls']) == 1:
                     era_id = implied['era_id_ls'][0]
                     bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
@@ -1377,7 +1404,7 @@ def extract_date_table_bulk(
                     g['ruler_id'] = bloc['ruler_id'].values[0]
                     g['era_id'] = era_id
                     g['era_start_year'] = bloc['era_start_year'].values[0]
-
+                """
                     
             # Check if we have sufficient context for dates with year/month/day constraints
             # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
@@ -1420,20 +1447,31 @@ def extract_date_table_bulk(
                         g, implied, era_df, phrase_dic, tpq, taq,
                         has_month, has_day, has_gz, has_lp
                     )
+                
+                # Separate into those needing lunar solution and those not needing lunar solution
+                g_a = g[g['lunar_solution'] == 1].copy()
+                result_df_a = pd.DataFrame()
+                result_df_b = g[g['lunar_solution'] == 0].copy()
+                if not g_a.empty:
+                    # Apply lunar constraints to the candidates (whether year was solved or not)
+                    month_val = g_a.iloc[0].get('month') if has_month and pd.notna(g_a.iloc[0].get('month')) else None
+                    day_val = g_a.iloc[0].get('day') if has_day and pd.notna(g_a.iloc[0].get('day')) else None
+                    gz_val = g_a.iloc[0].get('gz') if has_gz and pd.notna(g_a.iloc[0].get('gz')) else None
+                    lp_val = g_a.iloc[0].get('lp') if has_lp and pd.notna(g_a.iloc[0].get('lp')) else None
+                    nmd_gz_val = g_a.iloc[0].get('nmd_gz') if has_nmd_gz and pd.notna(g_a.iloc[0].get('nmd_gz')) else None
+                    intercalary_val = 1 if has_intercalary else None
 
-                # Apply lunar constraints to the candidates (whether year was solved or not)
-                month_val = g.iloc[0].get('month') if has_month and pd.notna(g.iloc[0].get('month')) else None
-                day_val = g.iloc[0].get('day') if has_day and pd.notna(g.iloc[0].get('day')) else None
-                gz_val = g.iloc[0].get('gz') if has_gz and pd.notna(g.iloc[0].get('gz')) else None
-                lp_val = g.iloc[0].get('lp') if has_lp and pd.notna(g.iloc[0].get('lp')) else None
-                nmd_gz_val = g.iloc[0].get('nmd_gz') if has_nmd_gz and pd.notna(g.iloc[0].get('nmd_gz')) else None
-                intercalary_val = 1 if has_intercalary else None
-
-                result_df, implied = solve_date_with_lunar_constraints(
-                    g, implied, lunar_table, phrase_dic,
-                    month=month_val, day=day_val, gz=gz_val, lp=lp_val, nmd_gz=nmd_gz_val, intercalary=intercalary_val,
-                    tpq=tpq, taq=taq, pg=pg, gs=gs
-                )
+                    result_df_a, implied = solve_date_with_lunar_constraints(
+                        g_a, implied, lunar_table, phrase_dic,
+                        month=month_val, day=day_val, gz=gz_val, lp=lp_val, nmd_gz=nmd_gz_val, intercalary=intercalary_val,
+                        tpq=tpq, taq=taq, pg=pg, gs=gs
+                    )
+                # Add JDN and ISO dates to proliferate candidates
+                if not result_df_b.empty:
+                    result_df_b = add_jdn_and_iso_to_proliferate_candidates(result_df_b, pg=pg, gs=gs)
+                result_df = pd.concat([i for i in [result_df_a, result_df_b] if not i.empty])
+                del g_a, result_df_a, result_df_b
+                
                 # If lunar constraints resulted in no matches (likely due to corruption),
                 # use the original input dataframe instead of empty
                 if result_df.empty:
@@ -1456,7 +1494,7 @@ def extract_date_table_bulk(
                     result_df = g.copy()
                     phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
                     result_df['error_str'] += phrase_dic.get('year-solving-failed', 'Year resolution failed; ')
-
+            
             # Add date_index and date_string to result
             # Ensure we always include the date, even if solving failed
             if result_df.empty:
@@ -1516,27 +1554,14 @@ def extract_date_table_bulk(
             prev_date_idx = date_idx
         
         # Combine all results
-        if all_results:
-            # Filter out empty DataFrames to avoid the warning
-            non_empty_results = [df for df in all_results if not df.empty]
-            if non_empty_results:
-                # Drop columns that are all-NA to avoid concat warnings
-                cleaned_results = []
-                for df in non_empty_results:
-                    # Keep only columns that have at least one non-NA value
-                    df_cleaned = df.dropna(axis=1, how='all')
-                    if not df_cleaned.empty:
-                        cleaned_results.append(df_cleaned)
-                if cleaned_results:
-                    output_df = pd.concat(cleaned_results, ignore_index=True)
-                else:
-                    output_df = pd.DataFrame()
-            else:
-                output_df = pd.DataFrame()
+        non_empty_results = [df for df in all_results if not df.empty]
+        if non_empty_results:
+            output_df = pd.concat(non_empty_results, ignore_index=True)
+            output_df = output_df.drop_duplicates().reset_index(drop=True)
         else:
             output_df = pd.DataFrame()
 
     # Return XML string (unchanged) and output dataframe
     xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
-        
+    
     return xml_string, output_df, implied

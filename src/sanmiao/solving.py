@@ -414,7 +414,7 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         'intercalary': 'lunar_intercalary',
         'nmd_gz': 'lunar_nmd_gz'
     })
-
+    
     # Merge lunar table with candidate dataframe
     cols = [col for col in g.columns if col not in lunar_filtered.columns] + ['cal_stream', 'ind_year']
     g = g[cols]
@@ -554,6 +554,59 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         if 'nmd_gz' in df.columns:
             df = df.drop(columns=['lunar_nmd_gz'])
     
+    elif has_lp and has_gz and not has_day and has_nmd_gz:
+        # Lunar phase + sexagenary day + nmd_gz provided
+        if lp_value == -1:  # 晦
+            # For 晦, we need to check if gz matches hui_gz
+            df = df[df['gz'] == df['hui_gz']].copy()
+            if 'hui_gz' in df.columns:
+                del df['hui_gz']
+            if df.empty:
+                df = g.copy()
+                df = df[df['month'] == df['lunar_month']].copy()
+                if 'error_str' not in df.columns:
+                    df['error_str'] = ""
+                df['error_str'] += phrase_dic.get('lp-gz-mismatch', 'Lunar phase-gz mismatch; ')
+            else:
+                df['jdn'] = df['hui_jdn']
+                df['day'] = df['max_day']
+        elif lp_value == 0:  # 朔
+            # For 朔, check if gz matches nmd_gz and lunar_nmd_gz
+            df = df[(df['gz'] == nmd_gz) & (df['gz'] == df['lunar_nmd_gz'])].copy()
+            if df.empty:
+                df = g.copy()
+                df = df[df['month'] == df['lunar_month']].copy()
+                if 'error_str' not in df.columns:
+                    df['error_str'] = ""
+                df['error_str'] += phrase_dic.get('lp-gz-mismatch', 'Lunar phase-gz mismatch; ')
+            else:
+                df['jdn'] = df['nmd_jdn']
+                df['day'] = 1
+        """
+        # Check month match
+        if len(months) > 0:
+            month_match = df[df['lunar_month'].isin(months)]
+            if month_match.empty:
+                if lp_value == -1:
+                    # Try next month
+                    next_months = [m + 1 for m in months]
+                    month_match = df[df['lunar_month'].isin(next_months)]
+                    if not month_match.empty:
+                        df = month_match
+                        updated_implied['month'] = next_months[0]
+                    else:
+                        # Return original candidates if month matching fails completely
+                        df = g.copy()
+                        df = df[df['month'] == df['lunar_month']].copy()
+                        df['error_str'] += phrase_dic.get('lp-gz-month-mismatch', 'Lunar phase-gz-month mismatch; ')
+                else:
+                    # Return original candidates if month matching fails
+                    df = g.copy()
+                    df = df[df['month'] == df['lunar_month']].copy()
+                    df['error_str'] += phrase_dic.get('lp-gz-month-mismatch', 'Lunar phase-gz-month mismatch; ')
+            else:
+                df = month_match
+        """
     elif has_lp and has_gz and not has_day and not has_nmd_gz:
         # Lunar phase + sexagenary day
         if lp_value == -1:  # 晦
@@ -718,3 +771,49 @@ def solve_date_with_lunar_constraints(g, implied, lunar_table, phrase_dic=phrase
         df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Anomaly in lunar constraint solving; ')
     
     return df, updated_implied
+
+
+def add_jdn_and_iso_to_proliferate_candidates(df, pg=False, gs=None):
+    """
+    Add JDN and ISO date columns to proliferate candidates that already have
+    lunar table data (nmd_jdn, hui_jdn, day) but are missing JDN calculation.
+    
+    This is used for candidates generated via the proliferate path that skip
+    solve_date_with_lunar_constraints but still need JDN and ISO dates for reporting.
+    
+    :param df: DataFrame with proliferate candidates (should have nmd_jdn, hui_jdn, day columns)
+    :param pg: proleptic gregorian flag
+    :param gs: Gregorian start date
+    :return: DataFrame with jdn and ISO_Date columns added
+    """
+    if df.empty:
+        return df
+    
+    df = df.copy()
+    print(df['day'])
+    # Calculate day if missing
+    if 'day' not in df.columns or df['day'].isna().all():
+        if 'lp' in df.columns and (df['lp'] == -1).any():
+            df['day'] = df['max_day']
+        elif 'lp' in df.columns and (df['lp'] == 0).any():
+            df['day'] = 1
+        elif 'gz' in df.columns and 'nmd_gz' in df.columns:
+            df['day'] = ((df['gz'] - df['nmd_gz']) % 60) + 1
+    
+    # Calculate JDN if missing
+    if 'jdn' not in df.columns or df['jdn'].isna().all():
+        # Calculate from new moon day + day offset
+        df['jdn'] = df['nmd_jdn'] + df['day'] - 1
+    
+    # Calculate ISO dates if we have JDN
+    if 'jdn' in df.columns and ('ISO_Date' not in df.columns or df['ISO_Date'].isna().all()):
+        df['ISO_Date'] = df['jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
+    
+    # Also add ISO_Date_Start and ISO_Date_End if we have nmd_jdn and hui_jdn
+    if 'nmd_jdn' in df.columns and 'hui_jdn' in df.columns:
+        if 'ISO_Date_Start' not in df.columns or df['ISO_Date_Start'].isna().all():
+            df['ISO_Date_Start'] = df['nmd_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
+        if 'ISO_Date_End' not in df.columns or df['ISO_Date_End'].isna().all():
+            df['ISO_Date_End'] = df['hui_jdn'].apply(lambda jd: jdn_to_iso(jd, pg, gs))
+    
+    return df

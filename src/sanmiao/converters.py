@@ -5,7 +5,7 @@ import pandas as pd
 from math import floor
 from typing import Tuple, Union
 
-from .config import DEFAULT_GREGORIAN_START
+from .config import normalize_defaults
 from .loaders import load_csv, load_num_tables
 from .config import phrase_dic_en, phrase_dic_fr
 from .utils import guess_variant
@@ -202,22 +202,6 @@ def numcon(x):
         return s
 
 
-def sanitize_gs(gs):
-    """
-    Return a list [year, month, day] of ints if valid,
-    otherwise the default [1582, 10, 15].
-    """
-    if not isinstance(gs, (list, tuple)):
-        return DEFAULT_GREGORIAN_START
-    if len(gs) != 3:
-        return DEFAULT_GREGORIAN_START
-    try:
-        y, m, d = [int(x) for x in gs]
-        return [y, m, d]
-    except (ValueError, TypeError):
-        return DEFAULT_GREGORIAN_START
-
-
 def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=None):
     """
     Convert a date string (YYYY-MM-DD) to a Julian Day Number (JDN).
@@ -228,8 +212,7 @@ def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=None):
     :return: float (Julian Day Number) or None if invalid
     """
     # Defaults
-    if gregorian_start is None:
-        gregorian_start = DEFAULT_GREGORIAN_START
+    gregorian_start, civ = normalize_defaults(gregorian_start)
 
     # Validate inputs
     if not re.match(r'^-?\d+-\d+-\d+$', date_string):
@@ -252,7 +235,6 @@ def iso_to_jdn(date_string, proleptic_gregorian=False, gregorian_start=None):
             return None
 
         # Determine calendar for historical mode
-        gregorian_start = sanitize_gs(gregorian_start)
         is_julian = False
         a, b, c = gregorian_start
         if not proleptic_gregorian:
@@ -294,11 +276,9 @@ def jdn_to_iso(jdn, proleptic_gregorian=False, gregorian_start=None):
     :return: str (ISO date string) or None if invalid
     """
     # Defaults
-    if gregorian_start is None:
-        gregorian_start = DEFAULT_GREGORIAN_START
+    gregorian_start, civ = normalize_defaults(gregorian_start)
 
     # Get Gregorian reform JDN
-    gregorian_start = sanitize_gs(gregorian_start)
     gs_str = f"{gregorian_start[0]}-{gregorian_start[1]}-{gregorian_start[2]}"
     gs_jdn = iso_to_jdn(gs_str, proleptic_gregorian, gregorian_start)
     if not isinstance(jdn, (int, float)):
@@ -348,10 +328,7 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, 
     :return output_string: str
     """
     # Defaults
-    if gregorian_start is None:
-        gregorian_start = DEFAULT_GREGORIAN_START
-    if civ is None:
-        civ = ['c', 'j', 'k']
+    gregorian_start, civ = normalize_defaults(gregorian_start, civ)
 
     if lang == 'en':
         phrase_dic = phrase_dic_en
@@ -504,9 +481,7 @@ def jy_to_ccs(y, lang='en', civ=None):
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
-    # Defaults
-    if civ is None:
-        civ = ['c', 'j', 'k']
+    _gs, civ = normalize_defaults(None, civ)
 
     if lang == 'en':
         phrase_dic = phrase_dic_en
