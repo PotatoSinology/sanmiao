@@ -621,7 +621,7 @@ def bulk_resolve_era_ids(df, era_df):
 
     # If no era strings, return as-is
     if 'era_str' not in out.columns or out['era_str'].notna().sum() == 0:
-        raise ValueError("No era strings found in DataFrame")
+        # raise ValueError("No era strings found in DataFrame")
         return out
     
     # Create minimal era mapping with all needed columns
