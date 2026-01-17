@@ -11,6 +11,7 @@ from .reporting import jdn_to_ccs, jy_to_ccs, generate_report_from_dataframe
 from .bulk_processing import extract_date_table, extract_date_table_bulk, dates_xml_to_df, normalise_date_fields, bulk_resolve_dynasty_ids, bulk_resolve_ruler_ids, bulk_resolve_era_ids
 from .tagging import tag_date_elements, consolidate_date, index_date_nodes
 from .xml_processing import filter_annals, backwards_fill_days
+from .loaders import prepare_tables
 
 # Import from main module
-from .sanmiao import cjk_date_interpreter, prepare_tables
+from .sanmiao import cjk_date_interpreter
