@@ -613,7 +613,6 @@ def bulk_resolve_era_ids(df, era_df):
                 # Merge to pick up era_id of ruler's first era
                 sub_bloc = sub_bloc.merge(era_df, how='left', on=['ruler_id'])
                 sub_bloc['era_str'] = sub_bloc['era_name']
-                sub_bloc.to_csv('sub_bloc.csv', index=False)
                 dfs.append(sub_bloc)
             # Recombine
             dfs = [i for i in dfs if not i.empty]
