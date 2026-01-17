@@ -617,7 +617,7 @@ def bulk_resolve_era_ids(df, era_df):
             # Recombine
             dfs = [i for i in dfs if not i.empty]
             out = pd.concat([out] + dfs).sort_values(by=['date_index']).drop_duplicates(subset=['date_index', 'era_id'])
-            return out
+            
 
     # If no era strings, return as-is
     if 'era_str' not in out.columns or out['era_str'].notna().sum() == 0:
