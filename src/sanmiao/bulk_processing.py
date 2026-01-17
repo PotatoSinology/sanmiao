@@ -217,7 +217,7 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
 
     rows = []
     # Use namespace-aware XPath
-    date_xpath = './/tei:date' if ns else './/date'
+    date_xpath = './/tei:date[@index]' if ns else './/date[@index]'
     for node in xml_root.xpath(date_xpath, namespaces=ns):
         # Always extract date_index and date_string
         row = {
@@ -593,8 +593,35 @@ def bulk_resolve_era_ids(df, era_df):
     """
     out = df.copy()
     
+    # Get no-era rulers
+    bloc = out.copy()
+    bloc = bloc[bloc['era_str'].isna()].dropna(subset=['ruler_id', 'year'])
+    del bloc['dyn_id']
+    bloc = bloc.drop_duplicates()
+    
+    if not bloc.empty:
+        # Isolate the first era of each ruler
+        temp = era_df.copy()[[i for i in era_df.columns if i not in ['cal_stream']]].sort_values(by=['era_start_year'])
+        temp = temp.drop_duplicates(subset=['ruler_id'])
+        # Remove problem cases from main DataFrame
+        out = out[~out['date_index'].isin(bloc['date_index'])].copy()
+        dfs = []
+        for idx in bloc['date_index'].dropna().unique():
+            # Isolate date index
+            sub_bloc = bloc[bloc['date_index'] == idx].copy()
+            # Merge to pick up era_id of ruler's first era
+            sub_bloc = sub_bloc.merge(era_df, how='left', on=['ruler_id'])
+            sub_bloc['era_str'] = sub_bloc['era_name']
+            sub_bloc.to_csv('sub_bloc.csv', index=False)
+            dfs.append(sub_bloc)
+        # Recombine
+        dfs = [i for i in dfs if not i.empty]
+        out = pd.concat([out] + dfs).sort_values(by=['date_index']).drop_duplicates(subset=['date_index', 'era_id'])
+        return out
+
     # If no era strings, return as-is
     if 'era_str' not in out.columns or out['era_str'].notna().sum() == 0:
+        raise ValueError("No era strings found in DataFrame")
         return out
     
     # Create minimal era mapping with all needed columns
@@ -1218,6 +1245,7 @@ def extract_date_table_bulk(
         df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
         df = bulk_resolve_ruler_ids(df, ruler_tag_df)
         df = bulk_resolve_era_ids(df, era_df)
+        
         # Save copy after ID resolution but before post_normalisation_func
         df_after_resolution = df.copy()
         
