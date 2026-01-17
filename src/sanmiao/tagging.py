@@ -37,7 +37,7 @@ PUNCT_RE = re.compile(r"^[，,、\s]*")
 
 ERA_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世)")
 DYNASTY_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世)")
-RULER_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世|即位)")
+RULER_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世|即位|踐阼)")
 
 
 def replace_in_text_and_tail(
@@ -539,6 +539,7 @@ def consolidate_date(text):
         ('dyn', 'filler'),
         ('year', 'season'),
         ('year', 'filler'),
+        ('year', 'sexYear'),
         ('sexYear', 'season'),
         ('sexYear', 'int'),
         ('sexYear', 'month'),
