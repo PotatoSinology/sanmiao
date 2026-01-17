@@ -597,7 +597,8 @@ def bulk_resolve_era_ids(df, era_df):
     if 'ruler_id' in out.columns:
         bloc = out.copy()
         bloc = bloc[bloc['era_str'].isna()].dropna(subset=['ruler_id', 'year'])
-        del bloc['dyn_id']
+        if 'dyn_id' in bloc.columns:
+            del bloc['dyn_id']
         bloc = bloc.drop_duplicates()
         
         if not bloc.empty:
@@ -617,7 +618,7 @@ def bulk_resolve_era_ids(df, era_df):
             # Recombine
             dfs = [i for i in dfs if not i.empty]
             out = pd.concat([out] + dfs).sort_values(by=['date_index']).drop_duplicates(subset=['date_index', 'era_id'])
-            
+    
 
     # If no era strings, return as-is
     if 'era_str' not in out.columns or out['era_str'].notna().sum() == 0:
@@ -662,7 +663,6 @@ def bulk_resolve_era_ids(df, era_df):
         on='date_index',
         suffixes=('', '_resolved')
     )
-    
     # Prioritize attributes over resolved values
     out = prioritize_resolved_values(out)
     return out

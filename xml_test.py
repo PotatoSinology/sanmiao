@@ -6,14 +6,15 @@ from sanmiao.config import DEFAULT_TPQ, DEFAULT_TAQ
 
 ui = """
 <root>
-<p>世宗明皇帝諱毓，小名統萬突，太祖長子也。母曰姚夫人，
-<date index="0"><era>永熙</era><year>三年</year></date>，太祖臨<season>夏</season>州，生帝於統萬城，因以名焉。
-<date index="1"><era>大統</era><year>十四年</year></date>，封寧都郡公。
-<date index="3"><dyn>魏</dyn><ruler>恭帝</ruler><year>三年</year></date>，授大將軍，鎮隴右。
-</p>
+<date index="0" dyn_id="50" ruler_id="3910" era_id="113" year="1"><era>鳳皇</era><year>元年</year></date>
+<date index="1"><dyn>魏</dyn><suffix>末</suffix></date>
+<date index="2"><era>太和</era><year>元年</year></date>
+<date index="3"><era>太平</era><year>元年</year></date>
+<date index="4" year="2"><year>三年</year><month>三月</month></date>
+<date index="5"><era>鳳皇</era><year>二年</year></date>
 </root>
 """
-# 
+
 def my_post_normalize(df):
     df = backwards_fill_days(df)
     df = filter_annals(df)
