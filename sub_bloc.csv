@@ -1,4 +1,0 @@
-date_index,date_string,dyn_str,ruler_str,era_str,year_str,sexYear_str,month_str,day_str,gz_str,lp_str,nmd_gz_str,has_int,present_elements,lunar_solution,year,sex_year,month,day,gz,lp,nmd_gz,intercalary,ruler_id,dyn_id,cal_stream,era_id,era_name,era_start_year,era_end_year,era_start_jdn,era_end_jdn,dila_id,max_year
-3,魏恭帝三年,魏,恭帝,元熙,三年,,,,,,,0,hry,1,3.0,,,,,,,,3667.0,51,1.0,150,元熙,419,420.0,1874138.5,1818252.5,,2.0
-3,魏恭帝三年,魏,恭帝,義寧,三年,,,,,,,0,hry,1,3.0,,,,,,,,3746.0,96,3.0,369,義寧,617,618.0,1946768.5,1946954.5,,2.0
-3,魏恭帝三年,魏,恭帝,,三年,,,,,,,0,hry,1,3.0,,,,,,,,320.0,93,3.0,691,,554,557.0,1923572.5,1924546.5,,4.0
