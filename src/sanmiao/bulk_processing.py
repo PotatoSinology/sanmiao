@@ -266,29 +266,30 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
                         # If conversion fails, keep as string
                         row[attr_name] = attr_value
 
-        # Build present_elements string - prioritize attributes if present, otherwise use child elements
+        # Build present_elements string from *tagged string elements only*.
+        # (Do NOT count numeric attributes like dyn_id/era_id/etc as "present".)
         present_elements = ""
-        if ('dyn_id' in row and pd.notna(row.get('dyn_id'))) or (row['dyn_str'] and row['dyn_str'].strip()):
+        if row['dyn_str'] and row['dyn_str'].strip():
             present_elements += "h"
-        if ('ruler_id' in row and pd.notna(row.get('ruler_id'))) or (row['ruler_str'] and row['ruler_str'].strip()):
+        if row['ruler_str'] and row['ruler_str'].strip():
             present_elements += "r"
-        if ('era_id' in row and pd.notna(row.get('era_id'))) or (row['era_str'] and row['era_str'].strip()):
+        if row['era_str'] and row['era_str'].strip():
             present_elements += "e"
-        if ('year' in row and pd.notna(row.get('year'))) or (row['year_str'] and row['year_str'].strip()):
+        if row['year_str'] and row['year_str'].strip():
             present_elements += "y"
-        if ('sex_year' in row and pd.notna(row.get('sex_year'))) or (row['sexYear_str'] and row['sexYear_str'].strip()):
+        if row['sexYear_str'] and row['sexYear_str'].strip():
             present_elements += "s"
-        if ('month' in row and pd.notna(row.get('month'))) or (row['month_str'] and row['month_str'].strip()):
+        if row['month_str'] and row['month_str'].strip():
             present_elements += "m"
-        if ('intercalary' in row and pd.notna(row.get('intercalary'))) or (row['has_int'] == 1):
+        if row['has_int'] == 1:
             present_elements += "i"
-        if ('lp' in row and pd.notna(row.get('lp'))) or (row['lp_str'] and row['lp_str'].strip()):
+        if row['lp_str'] and row['lp_str'].strip():
             present_elements += "l"
-        if ('nmd_gz' in row and pd.notna(row.get('nmd_gz'))) or (row['nmd_gz_str'] and row['nmd_gz_str'].strip()):
+        if row['nmd_gz_str'] and row['nmd_gz_str'].strip():
             present_elements += "z"
-        if ('day' in row and pd.notna(row.get('day'))) or (row['day_str'] and row['day_str'].strip()):
+        if row['day_str'] and row['day_str'].strip():
             present_elements += "d"
-        if ('gz' in row and pd.notna(row.get('gz'))) or (row['gz_str'] and row['gz_str'].strip()):
+        if row['gz_str'] and row['gz_str'].strip():
             present_elements += "g"
         row['present_elements'] = present_elements
 

@@ -167,9 +167,10 @@ def numcon(x):
                 # Units
                 try:
                     numeral += int(remainder[0])
-                finally:
-                    numeral = int(numeral)
-                    return int(numeral)
+                except (IndexError, ValueError):
+                    # If remainder is empty or not a digit, skip it
+                    pass
+                return int(numeral)
     else:  # To convert from integer/float to Chinese
         x = int(x)
         # Blank string
