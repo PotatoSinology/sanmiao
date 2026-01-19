@@ -1,10 +1,10 @@
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Import from modules
 from .converters import gz_year, jdn_to_gz, ganshu, numcon, iso_to_jdn, jdn_to_iso
 from .config import get_cal_streams_from_civ
 from .xml_utils import strip_ws_in_text_nodes, clean_attributes, remove_lone_tags, strip_text, replace_in_text_and_tail
-from .config import phrase_dic_en, phrase_dic_fr, date_elements, sanitize_gs
+from .config import phrase_dic_en, phrase_dic_fr, phrase_dic_zh, phrase_dic_ja, phrase_dic_de, get_phrase_dic, date_elements, sanitize_gs
 from .utils import guess_variant
 from .solving import solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints
 from .reporting import jdn_to_ccs, jy_to_ccs, generate_report_from_dataframe

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-01-19
+
+### Changed
+- Developped and tested XML markup functions
+- Further debugging
+- Several confusing era start and end dates fixed
+- Added Chinese, Japanese, and German output language support.
+
 ## [0.2.0] - 2025-01-08
 
 ### Changed
@@ -53,7 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.6...v0.1.7

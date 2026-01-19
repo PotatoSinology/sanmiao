@@ -1,18 +1,11 @@
-try:
-    from importlib.resources import files
-except ImportError:
-    from importlib_resources import files
-import time
 import pandas as pd
-from math import floor
-from functools import lru_cache
 import re
 import lxml.etree as et
 # Import modules
 from .loaders import prepare_tables
 from .config import (
     DEFAULT_TPQ, DEFAULT_TAQ, DEFAULT_GREGORIAN_START,
-    phrase_dic_en, phrase_dic_fr
+    get_phrase_dic
 )
 from .xml_utils import remove_lone_tags, strip_text
 from .reporting import jdn_to_ccs, jy_to_ccs, generate_report_from_dataframe
@@ -24,7 +17,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
     Main Chinese calendar date interpreter that processes various input formats.
 
     :param ui: str, input date string (Chinese calendar, ISO format, or Julian Day Number)
-    :param lang: str, language for output ('en' or 'fr')
+    :param lang: str, language for output ('en', 'fr', 'zh', 'ja', 'de'). Defaults to 'en' if not specified or invalid.
     :param jd_out: bool, whether to include Julian Day Numbers in output
     :param pg: bool, use proleptic Gregorian calendar
     :param gs: list, Gregorian start date [year, month, day]
@@ -42,10 +35,10 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
         civ = ['c', 'j', 'k']
     proliferate = not sequential
     
-    if lang == 'en':
-        phrase_dic = phrase_dic_en
-    else:
-        phrase_dic = phrase_dic_fr
+    # Default to 'en' if lang is None or invalid
+    if lang is None:
+        lang = 'en'
+    phrase_dic = get_phrase_dic(lang)
 
     ui = ui.replace(' ', '')
     ui = re.sub(r'[,;]', r'\n', ui)
@@ -66,8 +59,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
     
     for item in items:
         if item != '':
-            # Determine input type 
-        
+            # Determine input type
             # Find Chinese characters
             is_ccs = bool(re.search(r'[\u4e00-\u9fff]', item))
             # Find ISO strings

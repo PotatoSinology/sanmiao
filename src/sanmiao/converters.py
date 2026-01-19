@@ -5,9 +5,8 @@ import pandas as pd
 from math import floor
 from typing import Tuple, Union
 
-from .config import normalize_defaults
+from .config import normalize_defaults, get_phrase_dic
 from .loaders import load_csv, load_num_tables
-from .config import phrase_dic_en, phrase_dic_fr
 from .utils import guess_variant
 
 # Ganzhi conversion constants
@@ -330,11 +329,9 @@ def jdn_to_ccs(x, by_era=True, proleptic_gregorian=False, gregorian_start=None, 
     """
     # Defaults
     gregorian_start, civ = normalize_defaults(gregorian_start, civ)
-
-    if lang == 'en':
-        phrase_dic = phrase_dic_en
-    else:
-        phrase_dic = phrase_dic_fr
+    if lang is None:
+        lang = 'en'
+    phrase_dic = get_phrase_dic(lang)
     if isinstance(x, str):
         iso = x
         jdn = iso_to_jdn(x, proleptic_gregorian, gregorian_start)
@@ -478,26 +475,42 @@ def jy_to_ccs(y, lang='en', civ=None):
     """
     Convert Western year to Chinese calendar string.
     :param y: int
-    :param lang: str, language ('en' or 'fr')
+    :param lang: str, language ('en', 'fr', 'zh', 'ja', 'de'). Defaults to 'en' if not specified or invalid.
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
     :return output_string: str
     """
     _gs, civ = normalize_defaults(None, civ)
-
-    if lang == 'en':
-        phrase_dic = phrase_dic_en
-    else:
-        phrase_dic = phrase_dic_fr
+    if lang is None:
+        lang = 'en'
+    phrase_dic = get_phrase_dic(lang)
+    
+    # Year format strings for different languages
     if y > 0:
         if lang == 'en':
             fill = f"A.D. {int(y)}"
-        else:
+        elif lang == 'fr':
             fill = f"{int(y)} apr. J.-C."
+        elif lang == 'de':
+            fill = f"{int(y)} n. Chr."
+        elif lang == 'zh':
+            fill = f"公元{int(y)}年"
+        elif lang == 'ja':
+            fill = f"西暦{int(y)}年"
+        else:
+            fill = f"A.D. {int(y)}"  # Default to English
     else:
         if lang == 'en':
             fill = f"{int(abs(y)) + 1} B.C."
-        else:
+        elif lang == 'fr':
             fill = f"{int(abs(y)) + 1} av. J.-C."
+        elif lang == 'de':
+            fill = f"{int(abs(y)) + 1} v. Chr."
+        elif lang == 'zh':
+            fill = f"公元前{int(abs(y)) + 1}年"
+        elif lang == 'ja':
+            fill = f"紀元前{int(abs(y)) + 1}年"
+        else:
+            fill = f"{int(abs(y)) + 1} B.C."  # Default to English
     output_string = f'{phrase_dic.get("ui")}: {y} ({fill})\n{phrase_dic.get("matches")}:\n'
     # Load CSV tables
     era_df, dyn_df, ruler_df, lunar_table = load_num_tables(civ=civ)
