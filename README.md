@@ -1,10 +1,10 @@
 # Sanmiao
 
-> **Chinese and Japanese historical date conversion in Python**.
+> **Chinese, Japanese, and Korean historical date conversion in Python**.
 
 Author: Daniel Patrick Morgan (CNRS-CRCAO)
 
-Sanmiao is a Python package for date conversion to and from Chinese and Japanese historical calendars (3rd cent. B.C.–20th cent.) written by a historian of astronomy. 
+Sanmiao is a Python package for date conversion to and from Chinese, Japanese, and Korean historical calendars (3rd cent. B.C.–20th cent.) written by a historian of astronomy. 
 
 GitHub: [https://github.com/PotatoSinology/sanmiao](https://github.com/PotatoSinology/sanmiao)
 
@@ -50,15 +50,14 @@ Note that Sanmiao uses the astronomical year, where 1 B.C. = 0, 100 B.C. = -99
 ```Python
 result = sanmiao.cjk_date_interpreter(
     user_input,  # User input, accepts strings
-    lang='en',  # Lanuage, currently accepts 'en' and 'fr'
+            lang='en',  # Language: 'en' (English), 'fr' (French), 'zh' (Chinese), 'ja' (Japanese), 'de' (German). Defaults to 'en' if not specified or invalid.
     jd_out=False,  # Julian Day Number in output reports (vs ISO date string)
     pg=False,  # Proleptic Gregorian calendar
     gs=None,  # Start of Gregorian calendar, defaults to [1582, 10, 15] if None
-    tpq=-3000,  # Terminus post quem
-    taq=3000,  # Terminus ante quem
-    civ=None,  # Civilisation/s, defaults to ['c', 'j', 'k'] if None; set to ['j'] for Japan only
-    sequential=True,  # Intelligently fills missing fields in Sinitic date strings from previous ones
-    proliferate=True  # Finds all candidates for date strings without dynasty, ruler, or era;
+    tpq=-500,  # Terminus post quem (earliest date), defaults to -500
+    taq=2050,  # Terminus ante quem (latest date), defaults to 2050
+    civ=None,  # Civilisation/s, defaults to ['c', 'j', 'k'] if None; set to ['c'] for China only, ['j'] for Japan only, ['k'] for Korea only
+    sequential=True  # Intelligently fills missing fields in Sinitic date strings from previous ones (when False, proliferate mode finds all candidates for date strings without dynasty, ruler, or era)
     )
 ```
 
@@ -74,16 +73,16 @@ xml_string = consolidate_date(xml_string)
 # Remove lone dynasties, rulers, and eras
 xml_root = remove_lone_tags(xml_string)
 
-# Index date nodes
-xml_string = index_date_nodes(xml_string)
+# Remove non-date text
+xml_root = strip_text(xml_root)
 
 # Load calendar tables
 tables = prepare_tables(civ=civ)
 
 # Extract dates using optimized bulk function
 xml_string, output_df, implied = extract_date_table_bulk(
-    xml_string, implied=implied, pg=pg, gs=gs, lang=lang,
-    tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=False, proliferate=proliferate
+    xml_root, implied=implied, pg=pg, gs=gs, lang=lang,
+    tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=sequential, proliferate=not sequential
 )
 ```
 

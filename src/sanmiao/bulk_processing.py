@@ -4,13 +4,13 @@ import pandas as pd
 import lxml.etree as et
 from .config import (
     DEFAULT_TPQ, DEFAULT_TAQ, LP_DIC,
-    phrase_dic_en, phrase_dic_fr,
+    phrase_dic_en, get_phrase_dic,
+    get_cal_streams_from_civ, normalize_defaults
 )
 from .converters import (
     numcon, ganshu
 )
 from .loaders import prepare_tables
-from .config import get_cal_streams_from_civ, LP_DIC, normalize_defaults
 from .solving import (
     solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints,
     add_jdn_and_iso_to_proliferate_candidates
@@ -179,7 +179,7 @@ def extract_date_table(xml_string, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ
     :param xml_string: XML string with tagged date elements
     :param pg: bool, proleptic gregorian flag
     :param gs: list, gregorian start date [YYYY, MM, DD]
-    :param lang: str, language ('en' or 'fr')
+    :param lang: str, language ('en', 'fr', 'zh', 'ja', 'de'). Defaults to 'en' if not specified or invalid.
     :param tpq: int, terminus post quem
     :param taq: int, terminus ante quem
     :param civ: str or list, civilization filter
@@ -586,41 +586,108 @@ def bulk_resolve_era_ids(df, era_df):
     
     Takes a DataFrame with 'era_str' column and returns expanded DataFrame
     with 'era_id' column. Handles multiple matches (expands rows for variants).
+    Also handles empty era strings when ruler and year are present by selecting
+    the earliest era per ruler (using JDN start date).
     
     :param df: DataFrame with 'era_str' column (and 'date_index')
     :param era_df: DataFrame with columns ['era_name', 'era_id', 'ruler_id', 'dyn_id', 
-                                          'cal_stream', 'era_start_year', 'era_end_year', 'max_year']
+                                          'cal_stream', 'era_start_year', 'era_end_year', 'max_year', 'era_start_jdn']
     :return: DataFrame with additional era-related columns, expanded for multiple matches
     """
     out = df.copy()
     
-    # Get no-era rulers
-    if 'ruler_id' in out.columns:
-        bloc = out.copy()
-        bloc = bloc[bloc['era_str'].isna()].dropna(subset=['ruler_id', 'year'])
-        if 'dyn_id' in bloc.columns:
-            del bloc['dyn_id']
-        bloc = bloc.drop_duplicates()
+    # Handle empty era strings when ruler and year are present
+    # This prevents DataFrame expansion by selecting earliest era per ruler
+    if 'ruler_id' in out.columns and 'year' in out.columns:
+        # Find rows with ruler_id and year but no era_str
+        mask_no_era = out['era_str'].isna() & out['ruler_id'].notna() & out['year'].notna()
         
-        if not bloc.empty:
-            # Isolate the first era of each ruler
-            temp = era_df.copy()[[i for i in era_df.columns if i not in ['cal_stream']]].sort_values(by=['era_start_year'])
-            temp = temp.drop_duplicates(subset=['ruler_id'])
-            # Remove problem cases from main DataFrame
-            out = out[~out['date_index'].isin(bloc['date_index'])].copy()
-            dfs = []
-            for idx in bloc['date_index'].dropna().unique():
-                # Isolate date index
-                sub_bloc = bloc[bloc['date_index'] == idx].copy()
-                # Merge to pick up era_id of ruler's first era
-                sub_bloc = sub_bloc.merge(era_df, how='left', on=['ruler_id'])
-                sub_bloc['era_str'] = sub_bloc['era_name']
-                dfs.append(sub_bloc)
-            # Recombine
-            dfs = [i for i in dfs if not i.empty]
-            out = pd.concat([out] + dfs).sort_values(by=['date_index']).drop_duplicates(subset=['date_index', 'era_id'])
+        if mask_no_era.any():
+            # Get earliest era per ruler (using JDN start date for accurate ordering)
+            # Sort by era_start_jdn to get truly earliest era, drop duplicates on ruler_id
+            era_cols_needed = ['ruler_id', 'era_id', 'era_name', 'dyn_id', 'cal_stream', 
+                               'era_start_year', 'era_end_year']
+            if 'max_year' in era_df.columns:
+                era_cols_needed.append('max_year')
+            earliest_eras = era_df.sort_values(by='era_start_jdn').drop_duplicates(
+                subset=['ruler_id'], 
+                keep='first'
+            )[era_cols_needed].copy()
+            
+            # Prepare rows that need era resolution
+            # Keep all columns to preserve dynasty-ruler combinations
+            # Use the full rows (not just selected columns) to preserve all combinations
+            rows_needing_era = out[mask_no_era][['date_index', 'ruler_id']].copy()
+            if 'dyn_id' in out.columns:
+                # Preserve dyn_id for each row to maintain correct dynasty-ruler pairings
+                rows_needing_era = rows_needing_era.merge(
+                    out[mask_no_era][['date_index', 'ruler_id', 'dyn_id']],
+                    on=['date_index', 'ruler_id'],
+                    how='left'
+                )
+            
+            # Merge with earliest_eras
+            # Strategy: When dyn_id is present, we need to validate that the ruler actually belongs to that dynasty
+            # But we should preserve all valid combinations (e.g., if multiple dyn_ids exist for same date_index)
+            era_merge = pd.DataFrame()
+            if 'dyn_id' in rows_needing_era.columns:
+                # Split into rows with and without dyn_id
+                rows_with_dyn = rows_needing_era[rows_needing_era['dyn_id'].notna()].copy()
+                rows_without_dyn = rows_needing_era[rows_needing_era['dyn_id'].isna()].copy()
+                
+                era_merge_list = []
+                if not rows_with_dyn.empty:
+                    # When dynasty is specified, merge on both ruler_id and dyn_id
+                    # This ensures rulers match their actual dynasty (filters out invalid combinations)
+                    # But preserves all valid combinations (e.g., multiple dyn_ids for same date_index)
+                    era_with_dyn = earliest_eras.merge(
+                        rows_with_dyn[['date_index', 'ruler_id', 'dyn_id']],
+                        on=['ruler_id', 'dyn_id'],
+                        how='inner'
+                    )
+                    if not era_with_dyn.empty:
+                        era_merge_list.append(era_with_dyn)
+                
+                if not rows_without_dyn.empty:
+                    # No dynasty specified - get all eras for rulers matching the ruler_id
+                    # This gets all Taizu rulers regardless of dynasty (e.g., dyn_id=83 and dyn_id=119)
+                    era_no_dyn = earliest_eras.merge(
+                        rows_without_dyn[['date_index', 'ruler_id']],
+                        on='ruler_id',
+                        how='inner'
+                    )
+                    if not era_no_dyn.empty:
+                        era_merge_list.append(era_no_dyn)
+                
+                if era_merge_list:
+                    # Drop duplicates on date_index AND era_id to preserve all valid combinations
+                    # (e.g., same date_index with different dyn_ids should produce different eras)
+                    era_merge = pd.concat(era_merge_list, ignore_index=True).drop_duplicates(subset=['date_index', 'era_id'])
+            else:
+                # No dyn_id column, merge on ruler_id only
+                era_merge = earliest_eras.merge(
+                    rows_needing_era[['date_index', 'ruler_id']],
+                    on='ruler_id',
+                    how='inner'
+                )
+            
+            if not era_merge.empty:
+                # Merge era info back to out
+                era_cols = ['era_id', 'era_name', 'dyn_id', 'cal_stream',
+                           'era_start_year', 'era_end_year']
+                if 'max_year' in era_merge.columns:
+                    era_cols.append('max_year')
+                out = out.merge(
+                    era_merge[['date_index'] + era_cols],
+                    on='date_index',
+                    how='left',
+                    suffixes=('', '_resolved')
+                )
+                # Set era_str from era_name for rows that got matched
+                out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_str'] = out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_name']
+                # Prioritize resolved values
+                out = prioritize_resolved_values(out)
     
-
     # If no era strings, return as-is
     if 'era_str' not in out.columns or out['era_str'].notna().sum() == 0:
         # raise ValueError("No era strings found in DataFrame")
@@ -878,7 +945,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 date_rows = t_out
                 
                 # Clean columns
-                cols = ['_ind_year']  #
+                cols = ['_ind_year']
                 cols = [i for i in cols if i in t_out.columns]
                 date_rows = date_rows.drop(columns=cols)
 
@@ -1113,19 +1180,12 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
     else:
         # Return empty DataFrame with expected columns
         candidates_df = df_with_ids.copy()
-    
-    # # Ensure cal_stream is set (default to 1 if missing)
-    # # Commented out - problem is solved elsewhere
-    # if 'cal_stream' in candidates_df.columns:
-    #     candidates_df['cal_stream'] = candidates_df['cal_stream'].fillna(1.0)
-    # else:
-    #     candidates_df['cal_stream'] = 1.0
 
     cols = ['dyn_str', 'ruler_str', 'era_str', 'year_str', 'sexYear_str', 'month_str', 'day_str', 'gz_str', 'lp_str', 'nmd_gz_str', 'year_gz']
     cols = [i for i in cols if i in candidates_df.columns]
     candidates_df = candidates_df.drop(columns=cols)
     
-    # Stop-gap for problem I don't understand
+    # Fallback: preserve candidates if dropping dyn_id results in empty DataFrame
     bu = candidates_df.copy()
     if 'dyn_id' in candidates_df.columns:
         candidates_df = candidates_df.dropna(subset=['dyn_id'])
@@ -1186,7 +1246,7 @@ def extract_date_table_bulk(
     :param implied: Optional dict, implied state for sequential processing. If None, will be initialized with defaults
     :param pg: bool, proleptic gregorian flag
     :param gs: list, gregorian start date [YYYY, MM, DD]
-    :param lang: str, language ('en' or 'fr')
+    :param lang: str, language ('en', 'fr', 'zh', 'ja', 'de'). Defaults to 'en' if not specified or invalid.
     :param tpq: int, terminus post quem
     :param taq: int, terminus ante quem
     :param civ: str or list, civilization filter
@@ -1200,11 +1260,10 @@ def extract_date_table_bulk(
     # Defaults
     gs, civ = normalize_defaults(gs, civ)
     
-    # DPM: set in new inner scope
-    if lang == 'en':
-        phrase_dic = phrase_dic_en
-    else:
-        phrase_dic = phrase_dic_fr
+    # Set phrase dictionary based on language (default to 'en' if None or invalid)
+    if lang is None:
+        lang = 'en'
+    phrase_dic = get_phrase_dic(lang)
     
     if implied is None:
         implied = {
@@ -1222,7 +1281,7 @@ def extract_date_table_bulk(
     if isinstance(xml_root, str):
         xml_root = et.fromstring(xml_root)
     
-    # Step 1: Extract table  DPM: Moved to outer scope
+    # Step 1: Extract table
     df = dates_xml_to_df(xml_root, attributes=attributes)
 
     df['lunar_solution'] = 1
@@ -1230,7 +1289,7 @@ def extract_date_table_bulk(
     if df.empty:
         output_df = df
     else:
-        # Step 2: Normalize date fields (convert strings to numbers)  DPM: ready for outer scope
+        # Step 2: Normalize date fields (convert strings to numbers)
         df = normalise_date_fields(df)
 
         # Save copy before resolution to check which IDs were explicit attributes vs resolved from strings
@@ -1265,7 +1324,6 @@ def extract_date_table_bulk(
         # Step 6: Bulk generate candidates (Phase 2)
         df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
         df_candidates['error_str'] = ""
-        
         #############################################################################
         all_results = []
         
@@ -1366,12 +1424,12 @@ def extract_date_table_bulk(
             no_candidates_generated = False
 
             if g.empty:
-                # If no candidates were generated, create a fallback row from original df TODO verify this
+                # If no candidates were generated, create a fallback row from original df
                 if not original_rows.empty:
                     g = original_rows.iloc[[0]].copy()
                     if 'error_str' not in g.columns:
                         g['error_str'] = ""
-                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    phrase_dic = get_phrase_dic(lang if lang is not None else 'en')
                     g['error_str'] += phrase_dic.get('no-candidates', 'No candidates generated; ')
                     no_candidates_generated = True
                 else:
@@ -1423,17 +1481,6 @@ def extract_date_table_bulk(
                         if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
                             g['intercalary'] = implied['intercalary']
                         has_month = True
-                """
-                # NOTE: These implied values are applied elsewhere. Adding this here is a mistake.
-                elif no_era and len(implied['era_id_ls']) == 1:
-                    era_id = implied['era_id_ls'][0]
-                    bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
-                    g['cal_stream'] = bloc['cal_stream'].values[0]
-                    g['dyn_id'] = bloc['dyn_id'].values[0]
-                    g['ruler_id'] = bloc['ruler_id'].values[0]
-                    g['era_id'] = era_id
-                    g['era_start_year'] = bloc['era_start_year'].values[0]
-                """
 
             # Check if we have sufficient context for dates with year/month/day constraints
             # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
@@ -1450,7 +1497,7 @@ def extract_date_table_bulk(
                 # If we have temporal constraints but no context and no candidates were generated
                 if not has_context:
                     # Replace "no candidates" error with "insufficient information"
-                    g['error_str'] = phrase_dic.get('insufficient-information', 'Insufficient information; ')
+                    g['error_str'] = phrase_dic.get('insuff-data', 'Insufficient data')
                     # Skip solving - just return the error row
                     result_df = g.copy()
                     result_df['date_index'] = date_idx
@@ -1504,7 +1551,7 @@ def extract_date_table_bulk(
                 # use the original input dataframe instead of empty
                 if len(to_concat) == 0:
                     result_df = g.copy()
-                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    phrase_dic = get_phrase_dic(lang if lang is not None else 'en')
                     result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
                 else:
                     result_df = pd.concat(to_concat)
@@ -1522,7 +1569,7 @@ def extract_date_table_bulk(
                 # If year-only date solving resulted in no matches, return original candidates
                 if result_df.empty:
                     result_df = g.copy()
-                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    phrase_dic = get_phrase_dic(lang if lang is not None else 'en')
                     result_df['error_str'] += phrase_dic.get('year-solving-failed', 'Year resolution failed; ')
             
             # Add date_index and date_string to result
@@ -1538,7 +1585,7 @@ def extract_date_table_bulk(
                             result_df['present_elements'] = present_elements_val
                     if 'error_str' not in result_df.columns:
                         result_df['error_str'] = ""
-                    phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                    phrase_dic = get_phrase_dic(lang if lang is not None else 'en')
                     result_df['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
             
             if not result_df.empty:
@@ -1571,7 +1618,7 @@ def extract_date_table_bulk(
                         fallback_row['present_elements'] = present_elements_val
                 if 'error_str' not in fallback_row.columns:
                     fallback_row['error_str'] = ""
-                phrase_dic = phrase_dic_fr if lang == 'fr' else phrase_dic_en
+                phrase_dic = get_phrase_dic(lang if lang is not None else 'en')
                 fallback_row['error_str'] += phrase_dic.get('solving-failed', 'Date solving failed; ')
                 all_results.append(fallback_row)
                 # Store this date's results for next iteration (single row fallback)
