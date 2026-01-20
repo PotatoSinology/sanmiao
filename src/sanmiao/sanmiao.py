@@ -117,7 +117,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
 
                 # Index date nodes
                 xml_root = index_date_nodes(xml_root)
-                print(et.tostring(xml_root, pretty_print=True, encoding="unicode"))
+                
                 # Load calendar tables
                 tables = prepare_tables(civ=civ)
                 
@@ -133,7 +133,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Add canonical names to all results
                 if not output_df.empty:
                     output_df = add_can_names_bulk(output_df, ruler_can_names, dyn_df, era_df)
-
+                
                 # Generate report from dataframe
                 report = generate_report_from_dataframe(output_df, phrase_dic, jd_out)
             else:

@@ -9,10 +9,10 @@ from .xml_utils import (
 )
 
 SKIP = {"date","year","month","day","gz","sexYear","era","ruler","dyn","suffix","int","lp",
-        "nmdgz","lp_filler","filler","season","meta","pb","text","body"}  # adjust tags you want to skip
+        "nmdgz","lp_filler","filler","season","gy","rel","meta","pb","text","body"}  # adjust tags you want to skip
 
 SKIP_ALL = {"date","year","month","day","gz","sexYear","era","ruler","dyn","suffix",
-            "int","lp","nmdgz","lp_filler","filler","season"}
+            "int","lp","nmdgz","lp_filler","filler","season","gy","rel"}
 
 SKIP_TEXT_ONLY = {"pb", "meta"}
 
@@ -32,6 +32,8 @@ SEXYEAR_RE = re.compile(r"(([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰�
 SEASON_RE = re.compile(r"([春秋冬夏])")
 
 LP_RE = re.compile(r"([朔晦])")
+GY_RE = re.compile(r"(改元)")
+REL_RE = re.compile(r"([後次來明昨前去其是])([年歲月]*)(，*)")
 SEX_YEAR_PREFIX_RE = re.compile(r"(歲[次在])\s*$")
 PUNCT_RE = re.compile(r"^[，,、\s]*")
 
@@ -439,6 +441,17 @@ def tag_date_elements(text, civ=None):
     if civ is None:
         civ = ['c', 'j', 'k']
 
+    # Relational prefixes (tag first, then attach to following <date> later)
+    def make_rel(match):
+        # Preserve original text (including comma) inside the element
+        rel_text = (match.group(1) or "") + (match.group(2) or "") + (match.group(3) or "")
+        el = et.Element("rel")
+        el.set("dir", match.group(1) or "")
+        el.set("unit", match.group(2) or "")
+        el.text = rel_text
+        return el
+    replace_in_text_and_tail(xml_root, REL_RE, make_rel, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
+
     # Retrieve tag tables
     era_tag_df = load_csv('era_table.csv')
     # Filter era_tag_df by cal_stream
@@ -453,6 +466,13 @@ def tag_date_elements(text, civ=None):
     dyn_tag_list = dyn_tag_df['string'].unique()
     ruler_tag_list = ruler_tag_df['string'].unique()
     # Normal dates #####################################################################################################
+    # Tag 改元 first so later passes don't mis-tag the 元 inside it (e.g. as a dynasty).
+    def make_gy(match):
+        el = et.Element("gy")
+        el.text = match.group(1)
+        return el
+    replace_in_text_and_tail(xml_root, GY_RE, make_gy, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
+
     # Year, month, day, gz, season, lp
     xml_root = tag_basic_tokens(xml_root)
     # Lunar phases
@@ -509,6 +529,63 @@ def tag_date_elements(text, civ=None):
 
     # Suffixes #########################################################################################################
     xml_root = attach_suffixes(xml_root)
+
+    # Attach/wrap standalone <rel> #########################################################################
+    #
+    # Rules:
+    # - If <rel> immediately precedes a <date>, move it into that <date> as first child.
+    # - If <rel> is standalone, keep only those with non-empty unit by wrapping as <date><rel .../></date>.
+    # - Otherwise drop standalone rel (unit="").
+    for rel in list(xml_root.xpath(".//rel")):
+        # Skip rel already inside a date
+        if rel.xpath("boolean(ancestor::date)"):
+            continue
+
+        parent = rel.getparent()
+        if parent is None:
+            continue
+
+        next_el = rel.getnext()
+        rel_tail = rel.tail or ""
+
+        # Case A: immediately before a <date>
+        if next_el is not None and next_el.tag == "date" and rel_tail.strip() == "":
+            # Remove rel from parent and insert as first child of the date
+            idx = parent.index(rel)
+            parent.remove(rel)
+            rel.tail = None
+            next_el.insert(0, rel)
+            # If we removed any whitespace tail, it's fine to drop it.
+            continue
+
+        # Case B: standalone rel with unit -> wrap into its own <date>
+        unit = rel.get("unit") or ""
+        if unit.strip() != "":
+            idx = parent.index(rel)
+            # Preserve any tail outside the new <date>
+            tail_to_preserve = rel.tail
+            rel.tail = None
+
+            # Create <date> wrapper and move rel inside it
+            d = et.Element("date")
+            parent.insert(idx, d)
+            parent.remove(rel)
+            d.append(rel)
+
+            # Reattach preserved tail to the wrapper <date> (so surrounding text stays in document)
+            if tail_to_preserve:
+                d.tail = (d.tail or "") + tail_to_preserve
+            continue
+
+        # Case C: standalone rel with empty unit -> drop it, preserve tail in parent
+        prev = rel.getprevious()
+        tail = rel.tail or ""
+        if prev is None:
+            parent.text = (parent.text or "") + tail
+        else:
+            prev.tail = (prev.tail or "") + tail
+        parent.remove(rel)
+
     # Clean nested tags ################################################################################################
     # Remove lone tags
     for node in xml_root.xpath('.//date'):
