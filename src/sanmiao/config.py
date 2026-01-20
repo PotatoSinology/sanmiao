@@ -148,7 +148,7 @@ CAL_STREAM_MAPPINGS = {
 }
 
 # Date element types used in tagging
-date_elements = ['date', 'year', 'month', 'day', 'gz', 'sexYear', 'era', 'ruler', 'dyn', 'suffix', 'int', 'lp', 'nmdgz', 'lp_filler', 'filler', 'season']
+date_elements = ['date', 'year', 'month', 'day', 'gz', 'sexYear', 'era', 'ruler', 'dyn', 'suffix', 'int', 'lp', 'nmdgz', 'lp_filler', 'filler', 'season', 'gy', 'rel']
 
 
 def get_cal_streams_from_civ(civ) -> list:

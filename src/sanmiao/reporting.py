@@ -53,6 +53,21 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
     # Prepare dataframe for vectorized formatting
     df = output_df.copy()
 
+    # If this date has a relative year marker, append a simple warning to error_str
+    # (we keep using existing rel_* columns; no new schema required).
+    if all(c in df.columns for c in ["rel_dir", "rel_unit"]):
+        rel_dir = df["rel_dir"].astype("string").str.strip()
+        rel_unit = df["rel_unit"].astype("string").str.strip()
+        relative_dirs = {"明", "來", "次", "去", "昨", "前", "後"}
+        is_relative_year = rel_unit.isin(["年", "歲"]) & rel_dir.isin(list(relative_dirs))
+        if is_relative_year.any():
+            if "error_str" not in df.columns:
+                df["error_str"] = ""
+            # Avoid duplicating if upstream already added the warning.
+            existing = df.loc[is_relative_year, "error_str"].fillna("")
+            needs = ~existing.str.contains("relative date", regex=False)
+            df.loc[is_relative_year & needs, "error_str"] = existing[needs] + "relative date"
+
     # Ensure strings for concatenation (handle missing columns)
     for col in ["dyn_name", "ruler_name", "era_name"]:
         if col in df.columns:

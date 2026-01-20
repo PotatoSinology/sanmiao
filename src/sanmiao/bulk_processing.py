@@ -234,6 +234,10 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
             "dyn_str": get1(".//tei:dyn" if ns else ".//dyn"),
             "ruler_str": get1(".//tei:ruler" if ns else ".//ruler"),
             "era_str": get1(".//tei:era" if ns else ".//era"),
+            "rel_dir": get1(".//tei:rel/@dir" if ns else ".//rel/@dir"),
+            "rel_unit": get1(".//tei:rel/@unit" if ns else ".//rel/@unit"),
+            "rel_text": get1(".//tei:rel" if ns else ".//rel"),
+            "suffix_str": get1(".//tei:suffix" if ns else ".//suffix"),
             "year_str": get1(".//tei:year" if ns else ".//year"),
             "sexYear_str": get1(".//tei:sexYear" if ns else ".//sexYear"),
             "month_str": get1(".//tei:month" if ns else ".//month"),
@@ -595,6 +599,145 @@ def bulk_resolve_era_ids(df, era_df):
     :return: DataFrame with additional era-related columns, expanded for multiple matches
     """
     out = df.copy()
+
+    # -------------------------------------------------------------------------
+    # Suffix-aware era resolution
+    #
+    # Goal (DH-heuristics):
+    # - ruler/dyn+ruler + (初 / 之初 / 即位 / 踐阼): choose earliest era for that ruler; set year=1
+    # - ruler/dyn+ruler + (末 / 之末 / 末年): choose last era for that ruler
+    # - other suffix + ruler with exactly one era: choose that era
+    #
+    # We apply these only when the era is NOT explicitly specified (era_id/era_str missing).
+    # -------------------------------------------------------------------------
+    if 'suffix_str' in out.columns and 'ruler_id' in out.columns:
+        early_ruler_suffix = {'初', '之初', '即位', '踐阼'}
+        late_ruler_suffix = {'末', '之末', '末年'}
+
+        # Normalize suffix values (strip whitespace)
+        suf = out['suffix_str'].astype(str).str.strip()
+        suf = suf.where(out['suffix_str'].notna(), other=pd.NA)
+
+        # If ruler has "early" suffix and no year, interpret as year=1
+        # (only when no explicit era is present).
+        has_era_id = ('era_id' in out.columns and out['era_id'].notna())
+        mask_no_explicit_era = ~has_era_id if 'era_id' in out.columns else pd.Series(True, index=out.index)
+        if 'year' in out.columns and 'era_str' in out.columns:
+            mask_set_year1 = (
+                mask_no_explicit_era &
+                out['era_str'].isna() &
+                out['ruler_id'].notna() &
+                out['year'].isna() &
+                suf.isin(list(early_ruler_suffix))
+            )
+            if mask_set_year1.any():
+                out.loc[mask_set_year1, 'year'] = 1
+
+        # Helper: merge a chosen era row back into out on date_index
+        def _merge_chosen_era(era_choices: pd.DataFrame):
+            nonlocal out
+            if era_choices.empty:
+                return
+            era_cols = ['era_id', 'era_name', 'dyn_id', 'cal_stream', 'era_start_year', 'era_end_year']
+            if 'max_year' in era_choices.columns:
+                era_cols.append('max_year')
+            out = out.merge(
+                era_choices[['date_index'] + era_cols],
+                on='date_index',
+                how='left',
+                suffixes=('', '_resolved')
+            )
+            # Fill era_str from chosen era_name where missing
+            if 'era_str' in out.columns:
+                out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_str'] = out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_name']
+            out = prioritize_resolved_values(out)
+
+        # Choose LAST era for ruler when suffix indicates end-period.
+        if 'era_str' in out.columns:
+            mask_need_last = (
+                mask_no_explicit_era &
+                out['era_str'].isna() &
+                out['ruler_id'].notna() &
+                suf.isin(list(late_ruler_suffix))
+            )
+            if mask_need_last.any():
+                era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', 'era_name', 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
+                if 'max_year' in era_df.columns:
+                    era_cols_needed.append('max_year')
+                era_cols_needed = [c for c in era_cols_needed if c in era_df.columns]
+
+                # Latest era per (ruler_id, dyn_id) and per ruler_id (fallback)
+                latest_by_ruler_dyn = (
+                    era_df.sort_values(by='era_start_jdn', ascending=False)
+                    .drop_duplicates(subset=[c for c in ['ruler_id', 'dyn_id'] if c in era_df.columns], keep='first')
+                )
+                latest_by_ruler = (
+                    era_df.sort_values(by='era_start_jdn', ascending=False)
+                    .drop_duplicates(subset=['ruler_id'], keep='first')
+                )
+                latest_by_ruler_dyn = latest_by_ruler_dyn[era_cols_needed].copy()
+                latest_by_ruler = latest_by_ruler[era_cols_needed].copy()
+
+                rows_need = out[mask_need_last][['date_index', 'ruler_id']].copy()
+                if 'dyn_id' in out.columns:
+                    rows_need = rows_need.merge(
+                        out[mask_need_last][['date_index', 'ruler_id', 'dyn_id']],
+                        on=['date_index', 'ruler_id'],
+                        how='left'
+                    )
+
+                choices = pd.DataFrame()
+                if 'dyn_id' in rows_need.columns and 'dyn_id' in latest_by_ruler_dyn.columns:
+                    with_dyn = rows_need[rows_need['dyn_id'].notna()].copy()
+                    without_dyn = rows_need[rows_need['dyn_id'].isna()].copy()
+                    parts = []
+                    if not with_dyn.empty:
+                        p = latest_by_ruler_dyn.merge(with_dyn, on=['ruler_id', 'dyn_id'], how='inner')
+                        if not p.empty:
+                            parts.append(p)
+                    if not without_dyn.empty:
+                        p = latest_by_ruler.merge(without_dyn[['date_index', 'ruler_id']], on='ruler_id', how='inner')
+                        if not p.empty:
+                            parts.append(p)
+                    if parts:
+                        choices = pd.concat(parts, ignore_index=True).drop_duplicates(subset=['date_index', 'era_id'])
+                else:
+                    choices = latest_by_ruler.merge(rows_need[['date_index', 'ruler_id']], on='ruler_id', how='inner').drop_duplicates(subset=['date_index', 'era_id'])
+
+                _merge_chosen_era(choices)
+
+        # If there's some suffix (not early/late) and the ruler has exactly ONE era, choose it.
+        if 'era_str' in out.columns:
+            mask_need_single = (
+                mask_no_explicit_era &
+                out['era_str'].isna() &
+                out['ruler_id'].notna() &
+                suf.notna() &
+                ~suf.isin(list(early_ruler_suffix | late_ruler_suffix))
+            )
+            if mask_need_single.any():
+                # Count eras per ruler (and per ruler+dyn if dyn_id present)
+                era_counts_ruler = era_df.groupby('ruler_id')['era_id'].nunique()
+                single_rulers = set(era_counts_ruler[era_counts_ruler == 1].index.tolist())
+
+                rows_need = out[mask_need_single][['date_index', 'ruler_id']].copy()
+                rows_need = rows_need[rows_need['ruler_id'].isin(single_rulers)]
+
+                if not rows_need.empty:
+                    era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', 'era_name', 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
+                    if 'max_year' in era_df.columns:
+                        era_cols_needed.append('max_year')
+                    era_cols_needed = [c for c in era_cols_needed if c in era_df.columns]
+
+                    # For single-era rulers, any row is that sole era; pick earliest by era_start_jdn deterministically.
+                    sole_eras = (
+                        era_df[era_df['ruler_id'].isin(single_rulers)]
+                        .sort_values(by='era_start_jdn')
+                        .drop_duplicates(subset=['ruler_id'], keep='first')
+                    )[era_cols_needed].copy()
+
+                    choices = sole_eras.merge(rows_need[['date_index', 'ruler_id']], on='ruler_id', how='inner').drop_duplicates(subset=['date_index', 'era_id'])
+                    _merge_chosen_era(choices)
     
     # Handle empty era strings when ruler and year are present
     # This prevents DataFrame expansion by selecting earliest era per ruler
@@ -828,6 +971,29 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                         candidate_row[col] = first_row.get(col)
                 all_candidates.append(candidate_row)
             else:  # If proliferate is True
+                # If there are *no* numeric constraints at all (e.g., a rel-only <date>),
+                # don't attempt full lunar-table proliferation (it can yield empty merges).
+                constraint_cols = [c for c in ['year', 'month', 'day', 'gz', 'lp', 'nmd_gz', 'intercalary', 'sex_year'] if c in date_rows.columns]
+                has_any_constraint = False
+                if constraint_cols:
+                    has_any_constraint = date_rows[constraint_cols].notna().any().any()
+                if not has_any_constraint:
+                    first_row = date_rows.iloc[0]
+                    date_idx_numeric = pd.to_numeric(date_idx, errors='coerce')
+                    if pd.isna(date_idx_numeric):
+                        date_idx_numeric = date_idx
+                    candidate_row = {
+                        'date_index': date_idx_numeric,
+                        'dyn_id': None,
+                        'ruler_id': None,
+                        'era_id': None,
+                    }
+                    for col in out.columns:
+                        if col not in candidate_row and col != 'date_index':
+                            candidate_row[col] = first_row.get(col)
+                    all_candidates.append(candidate_row)
+                    continue
+
                 t_out = date_rows.copy()
                 # Copy lunar table
                 t_lt = lunar_table.copy()
@@ -863,7 +1029,13 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
                 # Filter those with to those matching the lunar table
                 a = a[a['nmd_gz_x'] == a['nmd_gz_y']]
                 b['nmd_gz_x'] = b['nmd_gz_y']
-                t_out = pd.concat([i for i in [a, b] if not i.empty])
+                keep = [i for i in [a, b] if not i.empty]
+                if not keep:
+                    # No viable objects to concatenate; leave empty and let downstream
+                    # handle this date_index as having no candidates.
+                    t_out = t_out.iloc[0:0]
+                else:
+                    t_out = pd.concat(keep)
                 t_out = t_out.drop(columns=['nmd_gz_y'])
                 t_out = t_out.rename(columns={'nmd_gz_x': 'nmd_gz'})
 
@@ -1206,28 +1378,41 @@ def add_can_names_bulk(table, ruler_can_names, dyn_df, era_df=None):
     :return: DataFrame with added 'ruler_name', 'dyn_name', and 'era_name' columns
     """
     out = table.copy()
-    
-    # Add ruler names
+
+    # Add ruler names (coalesce if already present)
     if 'ruler_id' in out.columns:
-        ruler_map = ruler_can_names.rename(columns={'person_id': 'ruler_id', 'string': 'ruler_name'})
-        out = out.merge(ruler_map[['ruler_id', 'ruler_name']], how='left', on='ruler_id')
+        ruler_map = ruler_can_names.rename(columns={'person_id': 'ruler_id', 'string': 'ruler_name_from_id'})
+        out = out.merge(ruler_map[['ruler_id', 'ruler_name_from_id']], how='left', on='ruler_id')
+        if 'ruler_name' not in out.columns:
+            out['ruler_name'] = None
+        out['ruler_name'] = out['ruler_name'].fillna(out['ruler_name_from_id'])
+        out = out.drop(columns=['ruler_name_from_id'])
     else:
         out['ruler_name'] = None
-    
-    # Add dynasty names
+
+    # Add dynasty names (coalesce if already present)
     if 'dyn_id' in out.columns:
-        dyn_map = dyn_df[['dyn_id', 'dyn_name']].drop_duplicates()
+        dyn_map = dyn_df[['dyn_id', 'dyn_name']].drop_duplicates().rename(columns={'dyn_name': 'dyn_name_from_id'})
         out = out.merge(dyn_map, how='left', on='dyn_id')
+        if 'dyn_name' not in out.columns:
+            out['dyn_name'] = None
+        out['dyn_name'] = out['dyn_name'].fillna(out['dyn_name_from_id'])
+        out = out.drop(columns=['dyn_name_from_id'])
     else:
         out['dyn_name'] = None
-    
-    # Add era names
+
+    # Add era names (coalesce if already present; avoid era_name_x/era_name_y collision)
     if era_df is not None and 'era_id' in out.columns:
-        era_map = era_df[['era_id', 'era_name']].drop_duplicates()
+        era_map = era_df[['era_id', 'era_name']].drop_duplicates().rename(columns={'era_name': 'era_name_from_id'})
         out = out.merge(era_map, how='left', on='era_id')
+        if 'era_name' not in out.columns:
+            out['era_name'] = None
+        out['era_name'] = out['era_name'].fillna(out['era_name_from_id'])
+        out = out.drop(columns=['era_name_from_id'])
     else:
-        out['era_name'] = None
-    
+        if 'era_name' not in out.columns:
+            out['era_name'] = None
+
     return out
 
 
@@ -1271,6 +1456,8 @@ def extract_date_table_bulk(
             'dyn_id_ls': [],
             'ruler_id_ls': [],
             'era_id_ls': [],
+            # Anchor for sequential relative-year handling (set only when previous date is single-solved)
+            'ind_year': None,
             'year': None,
             'month': None,
             'intercalary': None,
@@ -1291,6 +1478,15 @@ def extract_date_table_bulk(
     else:
         # Step 2: Normalize date fields (convert strings to numbers)
         df = normalise_date_fields(df)
+
+        # Suffix rule: if an ERA is tagged and has suffix 初/之初, interpret as year=1
+        # (only when year is otherwise unspecified).
+        if 'suffix_str' in df.columns and 'era_str' in df.columns and 'year' in df.columns:
+            suf = df['suffix_str'].astype(str).str.strip()
+            suf = suf.where(df['suffix_str'].notna(), other=pd.NA)
+            mask_era_year1 = df['era_str'].notna() & df['year'].isna() & suf.isin(['初', '之初'])
+            if mask_era_year1.any():
+                df.loc[mask_era_year1, 'year'] = 1
 
         # Save copy before resolution to check which IDs were explicit attributes vs resolved from strings
         df_before_resolution = df.copy()
@@ -1349,6 +1545,7 @@ def extract_date_table_bulk(
                     implied['month'] = None
                     implied['intercalary'] = None
                     implied['sex_year'] = None
+                    implied['ind_year'] = None
             
             # Get original row from df_before_resolution to check for explicit attributes
             # (before string resolution, so we can distinguish attributes from resolved values)
@@ -1377,6 +1574,41 @@ def extract_date_table_bulk(
             if original_rows.empty:
                 continue
             original_row = original_rows.iloc[0]
+
+            # -----------------------------------------------------------------
+            # Relative-year markers (明年/去年/前…/後… + 年/歲) indicate a shift in
+            # narrative time. In sequential mode, we should NOT carry forward
+            # implied values at the "year" level and below, because they belong
+            # to the previous year.
+            #
+            # We keep higher context (dyn/ruler/era/cal_stream) unless the text
+            # explicitly changes it.
+            # -----------------------------------------------------------------
+            rel_dir_raw = original_row.get('rel_dir') if hasattr(original_row, 'get') else None
+            rel_unit_raw = original_row.get('rel_unit') if hasattr(original_row, 'get') else None
+            if isinstance(rel_dir_raw, str):
+                rel_dir_raw = rel_dir_raw.strip()
+            if isinstance(rel_unit_raw, str):
+                rel_unit_raw = rel_unit_raw.strip()
+
+            _relative_year_offsets = {
+                '明': 1, '來': 1, '次': 1,
+                '去': -1, '昨': -1,
+                '前': -2,
+                '後': 2,
+            }
+            has_relative_year_marker = (
+                sequential and
+                rel_unit_raw in ('年', '歲') and
+                rel_dir_raw in _relative_year_offsets
+            )
+            if has_relative_year_marker:
+                # Do NOT clear implied['ind_year'] here: we still need the previous single-solved
+                # absolute year as an anchor for filtering (明年/去年/...).
+                implied['year'] = None
+                implied['sex_year'] = None
+                implied['month'] = None
+                implied['intercalary'] = None
             
             # Check if an era is explicitly specified via ATTRIBUTE (not via string resolution)
             # Only reset implied state when era_id is an explicit attribute
@@ -1454,6 +1686,27 @@ def extract_date_table_bulk(
                 no_era = g.dropna(subset=['era_id']).empty
             else:
                 no_era = True
+
+            # If this date has a relative year marker (e.g. 明年/去年) we should NOT
+            # blindly inherit the previous explicit year value; the relative marker
+            # is intended to shift the year.
+            rel_dir_pre = original_row.get('rel_dir') if hasattr(original_row, 'get') else None
+            rel_unit_pre = original_row.get('rel_unit') if hasattr(original_row, 'get') else None
+            if isinstance(rel_unit_pre, str):
+                rel_unit_pre = rel_unit_pre.strip()
+            if isinstance(rel_dir_pre, str):
+                rel_dir_pre = rel_dir_pre.strip()
+            _relative_year_offsets_pre = {
+                '明': 1, '來': 1, '次': 1,
+                '去': -1, '昨': -1,
+                '前': -2,
+                '後': 2,
+            }
+            suppress_inherited_year = (
+                sequential and
+                rel_unit_pre in ('年', '歲') and
+                rel_dir_pre in _relative_year_offsets_pre
+            )
             
             if sequential:
                 if no_year:  # No year but some sort of day
@@ -1469,11 +1722,14 @@ def extract_date_table_bulk(
                             g['era_id'] = implied['era_id_ls'][0]
                             bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
                             g['era_start_year'] = bloc['era_start_year'].values[0]
-                        if implied.get('year') is not None and ('year' not in g.columns or g['year'].isna().all()):
+                        if (not suppress_inherited_year) and implied.get('year') is not None and ('year' not in g.columns or g['year'].isna().all()):
                             g['year'] = implied['year']
-                        if implied.get('sex_year') is not None and ('sex_year' not in g.columns or g['sex_year'].isna().all()):
+                        if (not suppress_inherited_year) and implied.get('sex_year') is not None and ('sex_year' not in g.columns or g['sex_year'].isna().all()):
                             g['sex_year'] = implied['sex_year']
-                        has_year = True
+                        # Recompute year flags from the dataframe (don't "declare" year present).
+                        has_year = ('year' in g.columns) and g['year'].notna().any()
+                        has_sex_year = ('sex_year' in g.columns) and g['sex_year'].notna().any()
+                        no_year = not (has_year or has_sex_year)
                     # If there is no month, pick that up
                     if no_month and not no_day:
                         if implied.get('month') is not None and ('month' not in g.columns or g['month'].isna().all()):
@@ -1481,6 +1737,77 @@ def extract_date_table_bulk(
                         if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
                             g['intercalary'] = implied['intercalary']
                         has_month = True
+
+            # -----------------------------------------------------------------
+            # Sequential relative-year handling (year/歲 only)
+            #
+            # - Add a warning for relative year markers.
+            # - If we have a single-solved previous anchor year (implied['ind_year']),
+            #   filter candidates to that offset year.
+            # - Treat 其/是 as non-relative (no warning, no filtering).
+            # -----------------------------------------------------------------
+            rel_dir = original_row.get('rel_dir') if hasattr(original_row, 'get') else None
+            rel_unit = original_row.get('rel_unit') if hasattr(original_row, 'get') else None
+            if isinstance(rel_unit, str):
+                rel_unit = rel_unit.strip()
+            if isinstance(rel_dir, str):
+                rel_dir = rel_dir.strip()
+
+            relative_year_offsets = {
+                '明': 1, '來': 1, '次': 1,
+                '去': -1, '昨': -1,
+                '前': -2,
+                '後': 2,
+            }
+
+            is_relative_year = (
+                rel_unit in ('年', '歲') and
+                rel_dir in relative_year_offsets
+            )
+
+            if is_relative_year:
+                # Add warning (propagate through solving)
+                if 'error_str' not in g.columns:
+                    g['error_str'] = ""
+                g['error_str'] = g['error_str'].fillna("") + "relative date; "
+
+                # Apply anchor-year filtering only in sequential mode when we have an anchor
+                anchor_ind_year = implied.get('ind_year') if sequential else None
+                if anchor_ind_year is not None:
+                    try:
+                        target_ind_year = int(anchor_ind_year) + int(relative_year_offsets[rel_dir])
+                    except Exception:
+                        target_ind_year = None
+
+                    if target_ind_year is not None and not g.empty:
+                        g_before = g.copy()
+
+                        # If we have era_start_year available and no explicit year, convert the target
+                        # western year into an era-year constraint. This keeps the relative marker as a
+                        # limiting factor without needing ind_year to already be present in candidates.
+                        if ('year' in g.columns and g['year'].notna().any()):
+                            # Explicit year already present; don't override.
+                            pass
+                        elif 'era_start_year' in g.columns and g['era_start_year'].notna().any():
+                            try:
+                                era_start_year_val = int(g['era_start_year'].dropna().iloc[0])
+                                derived_year = (target_ind_year - era_start_year_val) + 1
+                                if derived_year > 0:
+                                    g['year'] = derived_year
+                            except Exception:
+                                pass
+                        elif 'ind_year' in g.columns:
+                            # Fallback for any pipelines that already have ind_year at this stage
+                            g = g[g['ind_year'].notna() & (g['ind_year'].astype(int) == target_ind_year)].copy()
+
+                        # If filter killed everything, revert but keep warning
+                        if g.empty:
+                            g = g_before
+
+                        # Recompute year flags after any relative-year anchoring.
+                        has_year = ('year' in g.columns) and g['year'].notna().any()
+                        has_sex_year = ('sex_year' in g.columns) and g['sex_year'].notna().any()
+                        no_year = not (has_year or has_sex_year)
 
             # Check if we have sufficient context for dates with year/month/day constraints
             # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
@@ -1552,7 +1879,15 @@ def extract_date_table_bulk(
                 if len(to_concat) == 0:
                     result_df = g.copy()
                     phrase_dic = get_phrase_dic(lang if lang is not None else 'en')
-                    result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
+                    # If we did NOT have an absolute year to begin with, this is usually expected
+                    # (month/day/lp constraints alone can't always be resolved to a unique JDN).
+                    # Only label it as a "constraint failed" case when an absolute year was present.
+                    # Treat year as "absolute" only when it was explicitly constrained
+                    # (numeric year or sexagenary year). If year is not constrained,
+                    # month/day/lp matching can legitimately yield no unique solution.
+                    had_absolute_year = (has_year or has_sex_year)
+                    if had_absolute_year:
+                        result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
                 else:
                     result_df = pd.concat(to_concat)
                     # Add metadata to result_df if not empty
@@ -1591,6 +1926,17 @@ def extract_date_table_bulk(
             if not result_df.empty:
                 # Clear preliminary errors if date was successfully resolved
                 result_df = clear_preliminary_errors(result_df)
+
+                # Update sequential anchor year only when this date is single-solved.
+                # This supports using the previous date as an anchor for relative-year filtering.
+                if sequential:
+                    if len(result_df) == 1 and 'ind_year' in result_df.columns and pd.notna(result_df['ind_year'].iloc[0]):
+                        try:
+                            implied['ind_year'] = int(result_df['ind_year'].iloc[0])
+                        except Exception:
+                            implied['ind_year'] = None
+                    else:
+                        implied['ind_year'] = None
                 
                 # Preserve metadata columns from original candidates
                 result_df['date_index'] = date_idx
