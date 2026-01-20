@@ -117,7 +117,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
 
                 # Index date nodes
                 xml_root = index_date_nodes(xml_root)
-                
+                print(et.tostring(xml_root, pretty_print=True, encoding="unicode"))
                 # Load calendar tables
                 tables = prepare_tables(civ=civ)
                 

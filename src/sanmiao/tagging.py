@@ -129,7 +129,8 @@ def replace_in_text_and_tail(
                         parent.insert(pos, new_el)
                         pos += 1
                     changed = True
-                    
+
+
 def make_simple_date(tagname, group=1):
     """
     Create a function that generates XML date elements with specified tag.
@@ -145,6 +146,7 @@ def make_simple_date(tagname, group=1):
         return d
     return _mk
 
+
 def make_sexyear(m):
     """
     Create a date element with sexYear structure: <date><sexYear>甲子<filler>年</filler></sexYear></date>
@@ -155,6 +157,7 @@ def make_sexyear(m):
     filler = et.SubElement(sy, "filler")
     filler.text = m.group(3)  # suffix (年 or 歲)
     return d
+
 
 def make_leap_month_exact_monthtext(month_text: str):
     """
@@ -168,6 +171,7 @@ def make_leap_month_exact_monthtext(month_text: str):
     m = et.SubElement(d, "month"); m.text = month_text
     return d
 
+
 def make_leapmonth_from_group1(m):
     """
     Create leap month element from regex match group 1.
@@ -177,9 +181,11 @@ def make_leapmonth_from_group1(m):
     """
     return make_leap_month_exact_monthtext(m.group(1))
 
+
 def make_leapmonth_yue(m):
     # "閏月" -> <date><int>閏</int><month>月</month></date>
     return make_leap_month_exact_monthtext("月")
+
 
 def tag_basic_tokens(xml_root):
     """
@@ -583,7 +589,6 @@ def clean_nested_tags(text):
     # Clean
     for node in xml_root.xpath('.//date//date'):
         node.tag = 'to_remove'
-    et.strip_tags(xml_root, 'to_remove')
     for tag in ['dyn', 'ruler', 'year', 'month', 'season', 'day', 'gz', 'lp', 'sexYear', 'nmdgz', 'lp_to_remove']:
         for node in xml_root.findall(f'.//{tag}//*'):
             node.tag = 'to_remove'
@@ -596,15 +601,6 @@ def clean_nested_tags(text):
                 for sn in node.findall('.//*'):
                     sn.tag = 'to_remove'
                 node.tag = 'to_remove'
-    # Clean nonsense
-    bad = ['一月', '一年', '一日']
-    for node in xml_root.xpath('.//date'):
-        if node.xpath('normalize-space(string())') in bad:
-            node.tag = 'to_remove'
-        tags = [sn.tag for sn in node.findall('./*')]
-        # Remove lonely lunar phase
-        if tags == ['lp']:
-            node.tag = 'to_remove'
     # Strip tags
     et.strip_tags(xml_root, 'to_remove')
     et.strip_tags(xml_root, 'lp_to_remove')

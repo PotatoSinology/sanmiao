@@ -55,6 +55,14 @@ def remove_lone_tags(xml_string: str) -> et._Element:
         return et.Element("root")
 
     for node in xml_root.xpath('.//date'):
+        # Common false positives from prose (e.g. "一年", "一月", "一日")
+        # that don't carry enough information to resolve as dates.
+        if node.xpath('normalize-space(string())') in ('一月', '一年', '一日'):
+            for child in node:
+                child.tag = 'to_remove'
+            node.tag = 'to_remove'
+            continue
+
         # Single character dates
         s = len(node.xpath('string()'))
         if s == 1:
@@ -62,6 +70,18 @@ def remove_lone_tags(xml_string: str) -> et._Element:
         # Dynasty, emperor, or era without anything else
         tags = [sn.tag for sn in node.xpath('./*')]
         if len(tags) == 1 and tags[0] in ('dyn', 'ruler', 'era'):
+            for child in node:
+                child.tag = 'to_remove'
+            node.tag = 'to_remove'
+        
+        # Lonely lunar phase (e.g. 朔/望) without any other date info
+        elif tags == ['lp']:
+            for child in node:
+                child.tag = 'to_remove'
+            node.tag = 'to_remove'
+        # Dynasty + emperor only (e.g. 漢高帝) is usually not a resolvable date
+        # and creates a lot of false positives when extracting dates from prose.
+        elif tags and set(tags).issubset({'dyn', 'ruler'}):
             for child in node:
                 child.tag = 'to_remove'
             node.tag = 'to_remove'
