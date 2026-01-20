@@ -33,7 +33,20 @@ SEASON_RE = re.compile(r"([春秋冬夏])")
 
 LP_RE = re.compile(r"([朔晦])")
 GY_RE = re.compile(r"(改元)")
-REL_RE = re.compile(r"([後次來明昨前去其是])([年歲月]*)(，*)")
+# Relational prefixes.
+#
+# IMPORTANT:
+# - We only tag when an explicit unit or punctuation is present.
+#   This prevents false positives like "明帝" (should become <ruler>明帝</ruler>, not <rel>明</rel><ruler>帝</ruler>)
+#   and "是魏" (should not become <rel>是</rel><dyn>魏</dyn>).
+# - We rely on later logic to move a <rel> into an adjacent <date> or wrap it.
+#
+# Groups:
+#   1 = dir char (明/去/其/是/...)
+#   2 = unit (年/歲/月) if present, else None
+#   3 = comma(s) after a unit, else None
+#   4 = comma(s) when there is no unit, else None
+REL_RE = re.compile(r"([後次來明昨前去其是])(?:([年歲月]+)(，*)|(，+))")
 SEX_YEAR_PREFIX_RE = re.compile(r"(歲[次在])\s*$")
 PUNCT_RE = re.compile(r"^[，,、\s]*")
 
@@ -441,15 +454,21 @@ def tag_date_elements(text, civ=None):
     if civ is None:
         civ = ['c', 'j', 'k']
 
-    # Relational prefixes (tag first, then attach to following <date> later)
+    # Relational prefixes ################################################################################################
+    # Tag early so we don't accidentally tag e.g. "明年" as the Ming dynasty "明".
+    # The regex is constrained so we do NOT tag bare "明" in "明帝", etc.
     def make_rel(match):
-        # Preserve original text (including comma) inside the element
-        rel_text = (match.group(1) or "") + (match.group(2) or "") + (match.group(3) or "")
+        dir_ = match.group(1) or ""
+        unit = match.group(2) or ""
+        comma = (match.group(3) or "") + (match.group(4) or "")
+        rel_text = dir_ + unit + comma
+
         el = et.Element("rel")
-        el.set("dir", match.group(1) or "")
-        el.set("unit", match.group(2) or "")
+        el.set("dir", dir_)
+        el.set("unit", unit)
         el.text = rel_text
         return el
+
     replace_in_text_and_tail(xml_root, REL_RE, make_rel, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
 
     # Retrieve tag tables
