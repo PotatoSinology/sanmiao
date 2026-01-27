@@ -641,9 +641,15 @@ def bulk_resolve_era_ids(df, era_df):
             era_cols = ['era_id', 'era_name', 'dyn_id', 'cal_stream', 'era_start_year', 'era_end_year']
             if 'max_year' in era_choices.columns:
                 era_cols.append('max_year')
+            # Merge on date_index and ruler_id if both are available to prevent cartesian product
+            # when multiple rows share the same date_index
+            merge_cols = ['date_index']
+            if 'ruler_id' in era_choices.columns and 'ruler_id' in out.columns:
+                merge_cols.append('ruler_id')
+            
             out = out.merge(
-                era_choices[['date_index'] + era_cols],
-                on='date_index',
+                era_choices[merge_cols + era_cols],
+                on=merge_cols,
                 how='left',
                 suffixes=('', '_resolved')
             )
@@ -651,6 +657,60 @@ def bulk_resolve_era_ids(df, era_df):
             if 'era_str' in out.columns:
                 out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_str'] = out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_name']
             out = prioritize_resolved_values(out)
+
+        # Choose EARLIEST era for ruler when suffix indicates start-period (即位, 初, etc.).
+        if 'era_str' in out.columns:
+            mask_need_early = (
+                mask_no_explicit_era &
+                out['era_str'].isna() &
+                out['ruler_id'].notna() &
+                suf.isin(list(early_ruler_suffix))
+            )
+            if mask_need_early.any():
+                era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', 'era_name', 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
+                if 'max_year' in era_df.columns:
+                    era_cols_needed.append('max_year')
+                era_cols_needed = [c for c in era_cols_needed if c in era_df.columns]
+
+                # Earliest era per (ruler_id, dyn_id) and per ruler_id (fallback)
+                earliest_by_ruler_dyn = (
+                    era_df.sort_values(by='era_start_jdn', ascending=True)
+                    .drop_duplicates(subset=[c for c in ['ruler_id', 'dyn_id'] if c in era_df.columns], keep='first')
+                )
+                earliest_by_ruler = (
+                    era_df.sort_values(by='era_start_jdn', ascending=True)
+                    .drop_duplicates(subset=['ruler_id'], keep='first')
+                )
+                earliest_by_ruler_dyn = earliest_by_ruler_dyn[era_cols_needed].copy()
+                earliest_by_ruler = earliest_by_ruler[era_cols_needed].copy()
+
+                rows_need = out[mask_need_early][['date_index', 'ruler_id']].copy()
+                if 'dyn_id' in out.columns:
+                    rows_need = rows_need.merge(
+                        out[mask_need_early][['date_index', 'ruler_id', 'dyn_id']],
+                        on=['date_index', 'ruler_id'],
+                        how='left'
+                    )
+
+                choices = pd.DataFrame()
+                if 'dyn_id' in rows_need.columns and 'dyn_id' in earliest_by_ruler_dyn.columns:
+                    with_dyn = rows_need[rows_need['dyn_id'].notna()].copy()
+                    without_dyn = rows_need[rows_need['dyn_id'].isna()].copy()
+                    parts = []
+                    if not with_dyn.empty:
+                        p = earliest_by_ruler_dyn.merge(with_dyn, on=['ruler_id', 'dyn_id'], how='inner')
+                        if not p.empty:
+                            parts.append(p)
+                    if not without_dyn.empty:
+                        p = earliest_by_ruler.merge(without_dyn[['date_index', 'ruler_id']], on='ruler_id', how='inner')
+                        if not p.empty:
+                            parts.append(p)
+                    if parts:
+                        choices = pd.concat(parts, ignore_index=True).drop_duplicates(subset=['date_index', 'era_id'])
+                else:
+                    choices = earliest_by_ruler.merge(rows_need[['date_index', 'ruler_id']], on='ruler_id', how='inner').drop_duplicates(subset=['date_index', 'era_id'])
+
+                _merge_chosen_era(choices)
 
         # Choose LAST era for ruler when suffix indicates end-period.
         if 'era_str' in out.columns:
@@ -844,38 +904,83 @@ def bulk_resolve_era_ids(df, era_df):
     
     era_map = era_df[era_cols].drop_duplicates()
     
+    # Only merge if era_id is not already set (skip if already resolved by suffix handling)
+    
     # Merge with era_df to get era_id and related columns
     # Use left merge to preserve all rows
-    era_merge = out[['date_index', 'era_str']].dropna(subset=['era_str']).merge(
-        era_map,
-        how='left',
-        left_on='era_str',
-        right_on='era_name',
-        suffixes=('', '_era')
-    )
+    # Only merge rows that don't already have era_id (already resolved by suffix handling)
+    if 'era_id' in out.columns:
+        # Split: rows with era_id already set vs rows needing resolution
+        rows_already_resolved = out[out['era_id'].notna()].copy()
+        rows_needing_resolution = out[out['era_id'].isna() & out['era_str'].notna()].copy()
+    else:
+        rows_already_resolved = pd.DataFrame()
+        rows_needing_resolution = out[out['era_str'].notna()].copy()
     
-    # Drop the temporary 'era_name' column from merge (we keep era_str for reference)
-    if 'era_name' in era_merge.columns:
-        era_merge = era_merge.drop(columns=['era_name'])
+    era_merge = pd.DataFrame()
+    if not rows_needing_resolution.empty:
+        era_merge = rows_needing_resolution[['date_index', 'era_str']].merge(
+            era_map,
+            how='left',
+            left_on='era_str',
+            right_on='era_name',
+            suffixes=('', '_era')
+        )
+        
+        # Drop the temporary 'era_name' column from merge (we keep era_str for reference)
+        if 'era_name' in era_merge.columns:
+            era_merge = era_merge.drop(columns=['era_name'])
+        
+        # Remove duplicates
+        era_merge = era_merge.drop_duplicates(subset=['date_index', 'era_id'])
     
-    # Remove duplicates
-    era_merge = era_merge.drop_duplicates(subset=['date_index', 'era_id'])
     
     # Merge back to original DataFrame, expanding rows where multiple matches exist
-    # Merge all era-related columns
-    era_cols_to_merge = ['era_id', 'ruler_id', 'dyn_id', 'cal_stream', 
-                        'era_start_year', 'era_end_year']
-    if 'max_year' in era_merge.columns:
-        era_cols_to_merge.append('max_year')
-    
-    out = out.merge(
-        era_merge[['date_index'] + era_cols_to_merge],
-        how='left',
-        on='date_index',
-        suffixes=('', '_resolved')
-    )
-    # Prioritize attributes over resolved values
-    out = prioritize_resolved_values(out)
+    # Only merge rows that don't already have era_id (skip rows already resolved by suffix handling)
+    if not era_merge.empty:
+        # Merge all era-related columns
+        era_cols_to_merge = ['era_id', 'ruler_id', 'dyn_id', 'cal_stream', 
+                            'era_start_year', 'era_end_year']
+        if 'max_year' in era_merge.columns:
+            era_cols_to_merge.append('max_year')
+        
+        # Only merge to rows that don't already have era_id
+        if 'era_id' in out.columns:
+            # Split: merge only to rows without era_id
+            mask_no_era_id = out['era_id'].isna()
+            if mask_no_era_id.any():
+                out_no_era = out[mask_no_era_id].copy()
+                out_with_era = out[~mask_no_era_id].copy()
+                
+                # Merge only the rows without era_id
+                out_no_era = out_no_era.merge(
+                    era_merge[['date_index'] + era_cols_to_merge],
+                    how='left',
+                    on='date_index',
+                    suffixes=('', '_resolved')
+                )
+                # Prioritize attributes over resolved values
+                out_no_era = prioritize_resolved_values(out_no_era)
+                
+                # Combine back
+                out = pd.concat([out_with_era, out_no_era], ignore_index=True)
+            else:
+                # All rows already have era_id, no merge needed - just prioritize
+                out = prioritize_resolved_values(out)
+        else:
+            # No era_id column, merge all rows
+            out = out.merge(
+                era_merge[['date_index'] + era_cols_to_merge],
+                how='left',
+                on='date_index',
+                suffixes=('', '_resolved')
+            )
+            # Prioritize attributes over resolved values
+            out = prioritize_resolved_values(out)
+    else:
+        # No era_merge to apply, but still prioritize if era_id exists
+        if 'era_id' in out.columns:
+            out = prioritize_resolved_values(out)
     return out
 
 
@@ -928,6 +1033,7 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             date_rows = out[out_date_index_numeric == date_idx_for_filter].copy()
         else:
             date_rows = pd.DataFrame()
+        
         
         # Extract all unique combinations of resolved IDs from these rows
         resolved_combinations = []
@@ -1654,6 +1760,7 @@ def extract_date_table_bulk(
             else:
                 g = df_candidates[df_candidates['date_index'] == date_idx].copy()
             no_candidates_generated = False
+            
 
             if g.empty:
                 # If no candidates were generated, create a fallback row from original df
@@ -1949,6 +2056,7 @@ def extract_date_table_bulk(
                         # Copy to all rows in result_df (in case solving expanded to multiple rows)
                         result_df['present_elements'] = present_elements_val
                 
+                
                 all_results.append(result_df)
                 # Store this date's results for next iteration
                 prev_date_results = result_df
@@ -1980,11 +2088,48 @@ def extract_date_table_bulk(
         non_empty_results = [df for df in all_results if not df.empty]
         if non_empty_results:
             output_df = pd.concat(non_empty_results, ignore_index=True)
-            output_df = output_df.drop_duplicates().reset_index(drop=True)
+            # Deduplicate by (ruler_id, dyn_id), preferring specific era_id over null and earliest era when multiple exist.
+            # Final deduplication by (ruler_id, era_id, dyn_id) removes exact duplicates.
+            if all(col in output_df.columns for col in ['ruler_id', 'era_id', 'dyn_id']):
+                # Sort so rows with non-null era_id come first (for each ruler_id, dyn_id group)
+                output_df['_era_id_is_null'] = output_df['era_id'].isna()
+                
+                # Merge era_start_jdn from era_df to sort by earliest era when available
+                if 'era_start_jdn' not in output_df.columns and era_df is not None and 'era_start_jdn' in era_df.columns:
+                    era_lookup = era_df[['era_id', 'era_start_jdn']].drop_duplicates(subset=['era_id'])
+                    output_df = output_df.merge(era_lookup, on='era_id', how='left', suffixes=('', '_lookup'))
+                    # Use the merged column if it exists, otherwise keep original (if it was already there)
+                    if 'era_start_jdn_lookup' in output_df.columns:
+                        output_df['era_start_jdn'] = output_df['era_start_jdn_lookup']
+                        output_df = output_df.drop(columns=['era_start_jdn_lookup'], errors='ignore')
+                
+                # Sort by (ruler_id, dyn_id, era_id_is_null, era_start_jdn) to prefer non-null era_id and earliest era
+                if 'era_start_jdn' in output_df.columns:
+                    output_df = output_df.sort_values(by=['ruler_id', 'dyn_id', '_era_id_is_null', 'era_start_jdn'], ascending=[True, True, True, True]).reset_index(drop=True)
+                else:
+                    # Fallback: sort by era_id if era_start_jdn not available
+                    output_df = output_df.sort_values(by=['ruler_id', 'dyn_id', '_era_id_is_null', 'era_id'], ascending=[True, True, True, True]).reset_index(drop=True)
+                
+                # Deduplicate by (ruler_id, dyn_id), keeping first (which prefers non-null era_id and earliest era)
+                output_df = output_df.drop_duplicates(subset=['ruler_id', 'dyn_id'], keep='first').reset_index(drop=True)
+                
+                # Drop the temporary column
+                output_df = output_df.drop(columns=['_era_id_is_null'], errors='ignore')
+                
+                # Final deduplication by (ruler_id, era_id, dyn_id) to remove any remaining exact duplicates
+                output_df = output_df.drop_duplicates(subset=['ruler_id', 'era_id', 'dyn_id'], keep='first').reset_index(drop=True)
+            else:
+                dup_cols = []
+                for col in ['ruler_id', 'era_id', 'dyn_id']:
+                    if col in output_df.columns:
+                        dup_cols.append(col)
+                if dup_cols:
+                    output_df = output_df.drop_duplicates(subset=dup_cols, keep='first').reset_index(drop=True)
+                else:
+                    output_df = output_df.drop_duplicates().reset_index(drop=True)
         else:
             output_df = pd.DataFrame()
 
     # Return XML string (unchanged) and output dataframe
     xml_string = et.tostring(xml_root, encoding='utf8').decode('utf8')
-    
     return xml_string, output_df, implied

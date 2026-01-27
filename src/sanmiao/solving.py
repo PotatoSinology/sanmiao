@@ -19,6 +19,7 @@ def preference_filtering_bulk(table, implied):
     if table.shape[0] < 2:
         return table
     
+    
     bu = table.copy()
     
     # Filter by implied era_id list
@@ -99,13 +100,79 @@ def solve_date_simple(g, implied, phrase_dic=phrase_dic_en, tpq=DEFAULT_TPQ, taq
     # Apply preference filtering
     df = preference_filtering_bulk(g.copy(), implied)
     
-    # Update implied state (clear year/month/intercalary for simple dates)
+    # Update implied state.
+    #
+    # Default behavior for "simple" dates (dyn/ruler/era-only) is to clear
+    # year/month/intercalary, because the narrative has changed context but
+    # didn't provide a resolvable absolute date.
+    #
+    # HOWEVER: we also have "null" relative markers like 是月 / 其月 / 其歲 etc.
+    # These are contextual anaphora and should NOT wipe the previously implied year,
+    # otherwise downstream month/day dates lose their anchor.
     updated_implied = implied.copy()
-    updated_implied.update({
-        'year': None,
-        'month': None,
-        'intercalary': None
-    })
+
+    # Determine whether this "simple" date actually changes context (dyn/ruler/era).
+    context_cols = [c for c in ('dyn_id', 'ruler_id', 'era_id', 'cal_stream') if c in df.columns]
+    has_explicit_context = any(df[c].notna().any() for c in context_cols)
+
+    # Determine whether this date is a true +/- relative year marker (e.g., 明年/去年/前…/後… + 年/歲).
+    rel_dir = None
+    rel_unit = None
+    if 'rel_dir' in df.columns:
+        vals = df['rel_dir'].dropna().astype(str).str.strip().unique()
+        rel_dir = vals[0] if len(vals) > 0 else None
+    if 'rel_unit' in df.columns:
+        vals = df['rel_unit'].dropna().astype(str).str.strip().unique()
+        rel_unit = vals[0] if len(vals) > 0 else None
+
+    relative_year_offsets = {'明', '來', '次', '去', '昨', '前', '後'}
+    is_relative_year_shift = (rel_unit in ('年', '歲')) and (rel_dir in relative_year_offsets)
+
+    # Treat 是/其/今 as "null" (non-shifting) relatives: explicitly inherit values.
+    is_null_relative = (rel_dir in ('是', '其', '今')) and (rel_unit in (None, '', '年', '歲', '月'))
+    is_null_relative_month = is_null_relative and (rel_unit == '月')
+    is_null_relative_year = is_null_relative and (rel_unit in ('年', '歲'))
+
+    if has_explicit_context or is_relative_year_shift:
+        # Context changed OR true relative-year shift: clear lower units.
+        updated_implied.update({'year': None, 'month': None, 'intercalary': None})
+    elif is_null_relative_month:
+        # 是月/其月/今月: inherit month, year, and everything above (era_id, ruler_id, dyn_id, cal_stream)
+        # WITHOUT resetting anything below month (day, intercalary, etc.)
+        if implied.get('month') is not None:
+            updated_implied['month'] = implied['month']
+        if implied.get('intercalary') is not None:
+            updated_implied['intercalary'] = implied['intercalary']
+        if implied.get('year') is not None:
+            updated_implied['year'] = implied['year']
+        if implied.get('sex_year') is not None:
+            updated_implied['sex_year'] = implied['sex_year']
+        # Inherit context (era_id, ruler_id, dyn_id, cal_stream) from implied lists
+        for key in ['cal_stream_ls', 'dyn_id_ls', 'ruler_id_ls', 'era_id_ls']:
+            if key in implied and implied[key]:
+                updated_implied[key] = implied[key]
+    elif is_null_relative_year:
+        # 是歲/其歲/今歲/是年/其年/今年: inherit year and everything above (era_id, ruler_id, dyn_id, cal_stream)
+        # WITHOUT resetting month or anything below (month, day, intercalary, etc.)
+        if implied.get('year') is not None:
+            updated_implied['year'] = implied['year']
+        if implied.get('sex_year') is not None:
+            updated_implied['sex_year'] = implied['sex_year']
+        # Inherit context (era_id, ruler_id, dyn_id, cal_stream) from implied lists
+        for key in ['cal_stream_ls', 'dyn_id_ls', 'ruler_id_ls', 'era_id_ls']:
+            if key in implied and implied[key]:
+                updated_implied[key] = implied[key]
+        # Explicitly preserve month and intercalary (do NOT reset them)
+        if implied.get('month') is not None:
+            updated_implied['month'] = implied['month']
+        if implied.get('intercalary') is not None:
+            updated_implied['intercalary'] = implied['intercalary']
+    elif is_null_relative:
+        # Bare 其/是 (no unit): keep implied values intact (same as before)
+        pass
+    else:
+        # For any other "simple" case with no explicit context, keep implied intact.
+        pass
 
     # Update implied ID lists if we have unique matches
     imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']
@@ -156,15 +223,20 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
 
     df = g.copy()
     
+    
     # Initialize updated_implied to avoid UnboundLocalError
     updated_implied = implied.copy()
 
     # Get year value from candidates (should be same for all rows in group)
     year = None
+    year_from_era_selection = False  # Track if year=1 comes from era selection (e.g., "即位")
     if 'year' in df.columns:
         year_vals = df['year'].dropna().unique()
         if len(year_vals) > 0:
             year = int(year_vals[0])
+            # Check if year=1 and we have multiple rulers - likely from era selection like "即位"
+            if year == 1 and 'ruler_id' in df.columns and df['ruler_id'].nunique() > 1:
+                year_from_era_selection = True
     
     # Get sexagenary year value
     sex_year = None
@@ -302,10 +374,15 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
     # If no month/day constraints, we're done (year-only date)
     if not has_month and not has_day and not has_gz and not has_lp:
         # Apply date range filter
+        # For queries like "世祖即位" (year=1 from era selection), preserve all matching rulers
+        # Only apply tpq/taq filter when we have an explicit year constraint (not from era selection)
         if df.shape[0] > 1 and 'ind_year' in df.columns:
-            temp = df[(df['ind_year'] >= tpq) & (df['ind_year'] <= taq)].copy()
-            if not temp.empty:
-                df = temp
+            if not year_from_era_selection:
+                # Explicit year constraint - apply tpq/taq filter
+                temp = df[(df['ind_year'] >= tpq) & (df['ind_year'] <= taq)].copy()
+                if not temp.empty:
+                    df = temp
+            # If year_from_era_selection is True, skip tpq/taq filter to preserve all matching rulers
 
         # Update implied ID lists
         imp_ls = ['cal_stream', 'dyn_id', 'ruler_id', 'era_id']

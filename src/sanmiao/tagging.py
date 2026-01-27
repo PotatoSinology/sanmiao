@@ -33,20 +33,23 @@ SEASON_RE = re.compile(r"([春秋冬夏])")
 
 LP_RE = re.compile(r"([朔晦])")
 GY_RE = re.compile(r"(改元)")
+
 # Relational prefixes.
 #
-# IMPORTANT:
-# - We only tag when an explicit unit or punctuation is present.
-#   This prevents false positives like "明帝" (should become <ruler>明帝</ruler>, not <rel>明</rel><ruler>帝</ruler>)
-#   and "是魏" (should not become <rel>是</rel><dyn>魏</dyn>).
-# - We rely on later logic to move a <rel> into an adjacent <date> or wrap it.
+# User rules (2026-01):
+# - Only "其" and "先是" may be tagged with unit="" (handled structurally later, not by regex).
+# - All other rel markers require an explicit unit (年/歲/月); without a unit they MUST NOT be tagged.
+# - "是歲，" / "今年，" / "今月，" may precede anything; whether it is *attached into* the following date is decided later.
+# - "明月" means "bright moon", not "next month", so we exclude "明" when followed by just "月".
 #
 # Groups:
-#   1 = dir char (明/去/其/是/...)
-#   2 = unit (年/歲/月) if present, else None
-#   3 = comma(s) after a unit, else None
-#   4 = comma(s) when there is no unit, else None
-REL_RE = re.compile(r"([後次來明昨前去其是])(?:([年歲月]+)(，*)|(，+))")
+#   1 = dir char (後/次/來/明/昨/前/去/其/是/今)
+#   2 = unit (年/歲/月), must be present in this regex
+#   3 = trailing Chinese comma(s) immediately following the unit (optional)
+# Note: Two patterns - one for "明" (must start with 年 or 歲), one for others
+REL_RE_MING = re.compile(r"(明)([年歲][月]?)(，*)")  # "明" must be followed by 年 or 歲 (optionally 月 after)
+REL_RE_OTHER = re.compile(r"([後次來昨前去其是今])([年歲月]+)(，*)")  # Other direction chars with any unit
+REL_RE_XIANSHI = re.compile(r"(先是)(，*)")  # "先是" (previously/before this) - special compound pattern
 SEX_YEAR_PREFIX_RE = re.compile(r"(歲[次在])\s*$")
 PUNCT_RE = re.compile(r"^[，,、\s]*")
 
@@ -234,8 +237,12 @@ def tag_basic_tokens(xml_root):
 
 def promote_gz_to_sexyear(xml_root):
     """
-    Promote sexagenary day (gz) elements to sexagenary year (sexYear) when preceded by year markers,
-    when preceded by a date element containing an era, or when appearing after an era within the same date.
+    Promote sexagenary day (gz) elements to sexagenary year (sexYear) when:
+    1. Preceded by explicit year markers like 歲次 or 歲在, OR
+    2. Followed by 年 or 歲 (e.g., "甲子年" where gz wasn't caught by SEXYEAR_RE)
+    
+    Lonely sexagenary binomes without fillers should remain as gz (day), not be
+    promoted to sexYear (year).
 
     :param xml_root: et.Element, root of XML tree to process
     :return: et.Element, modified XML root
@@ -244,7 +251,9 @@ def promote_gz_to_sexyear(xml_root):
         prev = d.getprevious()
         has_year_marker = False
         filler_text = ""
+        filler_position = "before"  # "before" for 歲次/歲在, "after" for 年/歲 suffix
 
+        # Check for prefix markers (歲次 or 歲在)
         if prev is None:
             s = d.getparent().text or ""
             loc = ("parent", d.getparent())
@@ -256,34 +265,25 @@ def promote_gz_to_sexyear(xml_root):
         if m:
             has_year_marker = True
             filler_text = m.group(1)
+            filler_position = "before"
             # Remove prefix text
             new_s = s[:m.start()]
             if loc[0] == "parent":
                 loc[1].text = new_s
             else:
                 loc[1].tail = new_s
-        elif prev is not None and prev.tag == "date" and prev.find("era") is not None:
-            # Previous sibling is a date element containing an era
-            has_year_marker = True
-            filler_text = ""  # No filler text needed for era case
 
+        # Check for suffix markers (年 or 歲) if no prefix found
         if not has_year_marker:
-            # Check if gz appears after era within the same date element
-            gz_elem = d.find("gz")
-            if gz_elem is not None:
-                # Find all elements before gz in this date
-                elements_before_gz = []
-                for child in d:
-                    if child == gz_elem:
-                        break
-                    elements_before_gz.append(child)
-
-                # Check if any preceding element is an era
-                for elem in elements_before_gz:
-                    if elem.tag == "era":
-                        has_year_marker = True
-                        filler_text = ""  # No filler text needed for era case
-                        break
+            tail = d.tail or ""
+            # Check if tail starts with 年 or 歲 (possibly with punctuation)
+            suffix_match = re.match(r"^([，,\s]*)([年歲])", tail)
+            if suffix_match:
+                has_year_marker = True
+                filler_text = suffix_match.group(2)
+                filler_position = "after"
+                # Remove the filler from tail
+                d.tail = suffix_match.group(1) + tail[suffix_match.end():]
 
         if not has_year_marker:
             continue
@@ -300,11 +300,14 @@ def promote_gz_to_sexyear(xml_root):
             # Replace gz with sexYear
             d.replace(gz_elem, sy)
 
-            # Add filler before sexYear if needed
+            # Add filler element
             if filler_text:
                 f = et.Element("filler")
                 f.text = filler_text
-                d.insert(d.index(sy), f)
+                if filler_position == "before":
+                    d.insert(d.index(sy), f)
+                else:  # after
+                    d.insert(d.index(sy) + 1, f)
 
     return xml_root
 
@@ -454,22 +457,40 @@ def tag_date_elements(text, civ=None):
     if civ is None:
         civ = ['c', 'j', 'k']
 
-    # Relational prefixes ################################################################################################
+    # Relational prefixes (unit-based) ###################################################################################
     # Tag early so we don't accidentally tag e.g. "明年" as the Ming dynasty "明".
-    # The regex is constrained so we do NOT tag bare "明" in "明帝", etc.
+    # IMPORTANT: bare "其" (unit="") is handled later structurally, not here.
     def make_rel(match):
         dir_ = match.group(1) or ""
         unit = match.group(2) or ""
-        comma = (match.group(3) or "") + (match.group(4) or "")
+        comma = (match.group(3) or "")
         rel_text = dir_ + unit + comma
 
         el = et.Element("rel")
         el.set("dir", dir_)
         el.set("unit", unit)
         el.text = rel_text
+        # Note: el.tail is set by replace_in_text_and_tail to preserve text after the match
+        return el
+    
+    def make_xianshi(match):
+        """Handle '先是' (previously/before this) - special compound pattern"""
+        comma = (match.group(2) or "")
+        rel_text = "先是" + comma
+        
+        el = et.Element("rel")
+        el.set("dir", "先")
+        el.set("unit", "")  # No unit for "先是"
+        el.text = rel_text
+        # Note: el.tail is set by replace_in_text_and_tail to preserve text after the match
+        
         return el
 
-    replace_in_text_and_tail(xml_root, REL_RE, make_rel, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
+    # Apply patterns in order: "先是" first (most specific), then "明", then others
+    # "先是" must come before REL_RE_OTHER to avoid matching "先" separately
+    replace_in_text_and_tail(xml_root, REL_RE_XIANSHI, make_xianshi, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
+    replace_in_text_and_tail(xml_root, REL_RE_MING, make_rel, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
+    replace_in_text_and_tail(xml_root, REL_RE_OTHER, make_rel, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
 
     # Retrieve tag tables
     era_tag_df = load_csv('era_table.csv')
@@ -549,12 +570,105 @@ def tag_date_elements(text, civ=None):
     # Suffixes #########################################################################################################
     xml_root = attach_suffixes(xml_root)
 
+    # Bare "其" without unit (structural tagging) #######################################################################
+    #
+    # Rule: tag standalone "其" only when it is directly adjacent to a following <date>
+    # (no punctuation between), and that immediate <date> begins with year/sexYear or lower.
+    #
+    # This prevents tagging discourse "其，" and prevents gluing "其" onto dynasty/ruler/era-only dates.
+    YEAR_OR_LOWER_TAGS = {"year", "sexYear", "month", "day", "gz", "nmdgz", "int", "lp", "season", "lp_filler", "filler"}
+
+    def _date_child_tags(d: et._Element) -> set[str]:
+        return {c.tag for c in d if isinstance(c.tag, str)}
+
+    def _maybe_insert_bare_qi_before_next_date(parent: et._Element, before_node: et._Element | None) -> None:
+        """
+        If the text slot right before the next sibling <date> ends with bare '其' (optionally followed by whitespace),
+        replace that '其' with a <rel dir="其" unit="">其</rel> element.
+        """
+        # Determine the string slot we are checking and the next sibling <date>
+        if before_node is None:
+            s = parent.text or ""
+            next_el = parent[0] if len(parent) > 0 else None
+            setter = ("text", parent)
+        else:
+            s = before_node.tail or ""
+            next_el = before_node.getnext()
+            setter = ("tail", before_node)
+
+        if not s or next_el is None or next_el.tag != "date":
+            return
+
+        # Must end with bare '其' (allow trailing whitespace only)
+        m = re.search(r"其(\s*)$", s)
+        if not m:
+            return
+
+        # The immediate next <date> must begin with year/sexYear or lower
+        next_tags = _date_child_tags(next_el)
+        if not (next_tags & YEAR_OR_LOWER_TAGS):
+            return
+
+        ws = m.group(1) or ""
+        prefix = s[:m.start()]
+
+        rel_el = et.Element("rel")
+        rel_el.set("dir", "其")
+        rel_el.set("unit", "")
+        rel_el.text = "其"
+        rel_el.tail = ws
+
+        if setter[0] == "text":
+            parent.text = prefix
+            parent.insert(0, rel_el)
+        else:
+            before_node.tail = prefix
+            # insert after before_node
+            idx = parent.index(before_node)
+            parent.insert(idx + 1, rel_el)
+
+    for parent in list(xml_root.iter()):
+        # Only consider parents that actually have a following element to attach to
+        if len(parent) > 0:
+            _maybe_insert_bare_qi_before_next_date(parent, None)
+            for child in list(parent):
+                _maybe_insert_bare_qi_before_next_date(parent, child)
+
     # Attach/wrap standalone <rel> #########################################################################
     #
     # Rules:
-    # - If <rel> immediately precedes a <date>, move it into that <date> as first child.
+    # - If <rel> immediately precedes a <date>, move it into that <date> as first child ONLY if allowed by rules below.
     # - If <rel> is standalone, keep only those with non-empty unit by wrapping as <date><rel .../></date>.
     # - Otherwise drop standalone rel (unit="").
+    #
+    # Attachment rules (user rules):
+    # - "其" and "先是" with unit="" can only attach if the immediate next <date> begins with year/sexYear or lower.
+    # - "是歲" / "其歲" / "今歲" (and "是年"/"其年"/"今年") may precede anything, but can only attach if the *date cluster* has year/sexYear or lower.
+    # - "是月" / "其月" / "今月" can only attach if the *date cluster* has month or lower.
+    # - All other rel markers require a unit; they can only attach if the immediate next <date> begins with month or lower.
+    MONTH_OR_LOWER_TAGS = {"month", "day", "gz", "nmdgz", "int", "lp", "season", "lp_filler", "filler"}
+    JOINER_TAIL_RE = re.compile(r"^[，,\s]*$")
+
+    def _collect_date_cluster(start: et._Element) -> list[et._Element]:
+        cluster = [start]
+        cur = start
+        while True:
+            tail = cur.tail or ""
+            if not JOINER_TAIL_RE.match(tail):
+                break
+            nxt = cur.getnext()
+            if nxt is None or nxt.tag != "date":
+                break
+            cluster.append(nxt)
+            cur = nxt
+        return cluster
+
+    def _cluster_child_tags(cluster: list[et._Element]) -> set[str]:
+        out: set[str] = set()
+        for d in cluster:
+            out |= _date_child_tags(d)
+        return out
+
     for rel in list(xml_root.xpath(".//rel")):
         # Skip rel already inside a date
         if rel.xpath("boolean(ancestor::date)"):
@@ -569,13 +683,38 @@ def tag_date_elements(text, civ=None):
 
         # Case A: immediately before a <date>
         if next_el is not None and next_el.tag == "date" and rel_tail.strip() == "":
-            # Remove rel from parent and insert as first child of the date
-            idx = parent.index(rel)
-            parent.remove(rel)
-            rel.tail = None
-            next_el.insert(0, rel)
-            # If we removed any whitespace tail, it's fine to drop it.
-            continue
+            dir_ = (rel.get("dir") or "").strip()
+            unit = (rel.get("unit") or "").strip()
+
+            next_tags = _date_child_tags(next_el)
+            cluster = _collect_date_cluster(next_el)
+            cluster_tags = _cluster_child_tags(cluster)
+
+            attach_ok = False
+
+            # Bare 其 or 先是 (unit="") is only allowed if the immediate next date begins with year/sexYear or lower.
+            if unit == "" and dir_ in ("其", "先"):
+                attach_ok = bool(next_tags & YEAR_OR_LOWER_TAGS)
+
+            # 是歲 / 其歲 / 今歲 (and 是年/其年/今年) may precede dyn/ruler/era, but only attach if the cluster has year/sexYear or lower.
+            elif dir_ in {"是", "其", "今"} and unit in {"歲", "年"}:
+                attach_ok = bool(cluster_tags & YEAR_OR_LOWER_TAGS)
+
+            # Optional: 是月 / 其月 / 今月 attach only if the cluster has month or lower.
+            elif dir_ in {"是", "其", "今"} and unit == "月":
+                attach_ok = bool(cluster_tags & MONTH_OR_LOWER_TAGS)
+
+            # All other rel markers require a unit and only attach if what follows begins with month or lower.
+            else:
+                if unit != "":
+                    attach_ok = bool(next_tags & MONTH_OR_LOWER_TAGS)
+
+            if attach_ok:
+                idx = parent.index(rel)
+                parent.remove(rel)
+                rel.tail = None
+                next_el.insert(0, rel)
+                continue
 
         # Case B: standalone rel with unit -> wrap into its own <date>
         unit = rel.get("unit") or ""

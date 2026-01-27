@@ -12,13 +12,15 @@ from .loaders import (
 from .utils import guess_variant
 
 
-def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=False):
+def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=False, tpq=None, taq=None):
     """
     Generate human-readable report from processed dataframe.
 
     :param output_df: DataFrame with processed date results (includes error_str, date_string, etc.)
     :param phrase_dic: Dictionary with UI phrases
     :param jd_out: Whether to output Julian Day numbers
+    :param tpq: Terminus post quem (earliest date filter)
+    :param taq: Terminus ante quem (latest date filter)
     :return: Formatted report string
     """
     if output_df.empty:
@@ -45,10 +47,35 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
             date_string = "unknown date"
         return f'{phrase_dic["ui"]}: {date_string}\n{phrase_dic["matches"]}:\n{phrase_dic["insuff-data"]}'
 
-    # Check for too many candidates
+    # Check for too many candidates - filter by tpq/taq if provided
     if len(output_df) > 15:
-        date_string = output_df['date_string'].iloc[0] if not output_df.empty and 'date_string' in output_df.columns else "unknown date"
-        return f'{phrase_dic["ui"]}: {date_string}\n{phrase_dic["matches"]}:\n{len(output_df)} {phrase_dic["too-many-cand"]}'
+        # Filter by tpq/taq if provided
+        if tpq is not None or taq is not None:
+            # Use ind_year if available, otherwise use era_start_year or era_end_year
+            filter_mask = pd.Series([True] * len(output_df), index=output_df.index)
+            
+            if 'ind_year' in output_df.columns:
+                if tpq is not None:
+                    filter_mask &= output_df['ind_year'].notna() & (output_df['ind_year'] >= tpq)
+                if taq is not None:
+                    filter_mask &= output_df['ind_year'].notna() & (output_df['ind_year'] <= taq)
+            elif 'era_start_year' in output_df.columns:
+                if tpq is not None:
+                    filter_mask &= output_df['era_start_year'].notna() & (output_df['era_start_year'] >= tpq)
+                if taq is not None:
+                    filter_mask &= output_df['era_start_year'].notna() & (output_df['era_start_year'] <= taq)
+            elif 'era_end_year' in output_df.columns:
+                if tpq is not None:
+                    filter_mask &= output_df['era_end_year'].notna() & (output_df['era_end_year'] >= tpq)
+                if taq is not None:
+                    filter_mask &= output_df['era_end_year'].notna() & (output_df['era_end_year'] <= taq)
+            
+            output_df = output_df[filter_mask].copy()
+        
+        # If still too many after filtering, return error message
+        if len(output_df) > 15:
+            date_string = output_df['date_string'].iloc[0] if not output_df.empty and 'date_string' in output_df.columns else "unknown date"
+            return f'{phrase_dic["ui"]}: {date_string}\n{phrase_dic["matches"]}:\n{len(output_df)} {phrase_dic["too-many-cand"]}'
 
     # Prepare dataframe for vectorized formatting
     df = output_df.copy()
@@ -186,9 +213,10 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
     )
 
     # Group by date_index and combine lines
+    # Deduplicate report_line values to avoid showing the same line multiple times
     lines_by_date = (
         df.groupby("date_index")["report_line"]
-        .agg(lambda s: "\n".join([x for x in s if x]))
+        .agg(lambda s: "\n".join([x for x in s.unique() if x]))
     )
 
     # Generate final report with headers and errors
