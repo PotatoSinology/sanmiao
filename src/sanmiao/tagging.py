@@ -504,7 +504,15 @@ def tag_date_elements(text, civ=None):
     # Reduce to lists
     era_tag_list = era_tag_df['era_name'].unique()
     dyn_tag_list = dyn_tag_df['string'].unique()
-    ruler_tag_list = ruler_tag_df['string'].unique()
+    
+    # Split ruler tags into regular and era_prefix_only
+    if 'era_prefix_only' in ruler_tag_df.columns:
+        era_prefix_ruler_tags = ruler_tag_df[ruler_tag_df['era_prefix_only'] == True]['string'].unique()
+        regular_ruler_tags = ruler_tag_df[ruler_tag_df['era_prefix_only'] != True]['string'].unique()
+    else:
+        era_prefix_ruler_tags = []
+        regular_ruler_tags = ruler_tag_df['string'].unique()
+    ruler_tag_list = list(regular_ruler_tags) + list(era_prefix_ruler_tags)  # Keep for backward compatibility
     # Normal dates #####################################################################################################
     # Tag 改元 first so later passes don't mis-tag the 元 inside it (e.g. as a dynasty).
     def make_gy(match):
@@ -599,11 +607,87 @@ def tag_date_elements(text, civ=None):
         replace_in_text_and_tail(xml_root, era_pattern, make_era, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
 
     # Ruler Names ######################################################################################################
-    # Reduce list
-    ruler_tag_list = [s for s in ruler_tag_list if isinstance(s, str) and s]
-    if ruler_tag_list:
-        ruler_tag_list.sort(key=len, reverse=True)
-        ruler_pattern = re.compile("(" + "|".join(map(re.escape, ruler_tag_list)) + ")")
+    # First pass: Tag era_prefix_only ruler tags immediately before era elements
+    if len(era_prefix_ruler_tags) > 0:
+        era_prefix_ruler_list = [s for s in era_prefix_ruler_tags if isinstance(s, str) and s]
+        if era_prefix_ruler_list:
+            era_prefix_ruler_list.sort(key=len, reverse=True)
+            era_prefix_ruler_pattern = re.compile("(" + "|".join(map(re.escape, era_prefix_ruler_list)) + ")")
+
+            def make_ruler(match):
+                d = et.Element("date")
+                e = et.SubElement(d, "ruler")
+                e.text = match.group(1)
+                return d
+
+            def tag_era_prefix_rulers_before_eras(xml_root, pattern, make_element):
+                """Tag era_prefix_only ruler names that occur immediately before <date> elements containing eras."""
+                changed = True
+                max_passes = 10
+                for _ in range(max_passes):
+                    if not changed:
+                        break
+                    changed = False
+                    
+                    # Find all date elements that contain era elements
+                    date_elements_with_era = []
+                    for date_el in xml_root.iter("date"):
+                        # Check if this date element contains an era
+                        if date_el.find("era") is not None:
+                            # Skip if nested inside another date element
+                            parent = date_el.getparent()
+                            if parent is not None and parent.tag == "date":
+                                continue
+                            date_elements_with_era.append(date_el)
+                    
+                    for date_el in date_elements_with_era:
+                        parent = date_el.getparent()
+                        if parent is None:
+                            continue
+                        
+                        idx = parent.index(date_el)
+                        text_to_check = None
+                        is_tail = False
+                        target_element = None
+                        
+                        # Check the tail of the previous sibling (if exists)
+                        if idx > 0:
+                            prev_sibling = parent[idx - 1]
+                            if prev_sibling.tail:
+                                text_to_check = prev_sibling.tail
+                                is_tail = True
+                                target_element = prev_sibling
+                        # Otherwise check parent's text before this date element
+                        elif parent.text:
+                            text_to_check = parent.text
+                            is_tail = False
+                            target_element = parent
+                        
+                        if text_to_check:
+                            # Use regex to find all matches ending at the end of the text
+                            matches_at_end = [m for m in pattern.finditer(text_to_check) if m.end() == len(text_to_check)]
+                            if matches_at_end:
+                                # Take the longest match
+                                match = matches_at_end[0]
+                                new_el = make_element(match)
+                                
+                                if is_tail:
+                                    target_element.tail = text_to_check[:match.start()]
+                                    parent.insert(idx, new_el)
+                                else:
+                                    target_element.text = text_to_check[:match.start()]
+                                    parent.insert(0, new_el)
+                                changed = True
+                                # Break to restart iteration with updated structure
+                                break
+            
+            tag_era_prefix_rulers_before_eras(xml_root, era_prefix_ruler_pattern, make_ruler)
+    
+    # Second pass: Tag regular ruler tags anywhere (exclude era_prefix_only tags)
+    regular_ruler_list = [s for s in regular_ruler_tags if isinstance(s, str) and s]
+    if regular_ruler_list:
+        regular_ruler_list.sort(key=len, reverse=True)
+        ruler_pattern = re.compile("(" + "|".join(map(re.escape, regular_ruler_list)) + ")")
 
         def make_ruler(match):
             d = et.Element("date")
