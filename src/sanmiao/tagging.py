@@ -532,6 +532,70 @@ def tag_date_elements(text, civ=None):
             e.text = match.group(1)
             return d
 
+        # First pass: Tag eras immediately before <date> elements
+        def tag_eras_before_dates(xml_root, pattern, make_element):
+            """Tag era names that occur immediately before <date> elements."""
+            changed = True
+            max_passes = 10
+            for _ in range(max_passes):
+                if not changed:
+                    break
+                changed = False
+                
+                # Collect only top-level date elements (filter nested ones during collection)
+                date_elements = []
+                for date_el in xml_root.iter("date"):
+                    # Skip if nested inside another date element (check only direct parent)
+                    parent = date_el.getparent()
+                    if parent is not None and parent.tag == "date":
+                        continue
+                    date_elements.append(date_el)
+                
+                for date_el in date_elements:
+                    parent = date_el.getparent()
+                    if parent is None:
+                        continue
+                    
+                    idx = parent.index(date_el)
+                    text_to_check = None
+                    is_tail = False
+                    target_element = None
+                    
+                    # Check the tail of the previous sibling (if exists)
+                    if idx > 0:
+                        prev_sibling = parent[idx - 1]
+                        if prev_sibling.tail:
+                            text_to_check = prev_sibling.tail
+                            is_tail = True
+                            target_element = prev_sibling
+                    # Otherwise check parent's text before this date element
+                    elif parent.text:
+                        text_to_check = parent.text
+                        is_tail = False
+                        target_element = parent
+                    
+                    if text_to_check:
+                        # Use regex to find all matches ending at the end of the text
+                        # This is more efficient than iterating through era list
+                        matches_at_end = [m for m in pattern.finditer(text_to_check) if m.end() == len(text_to_check)]
+                        if matches_at_end:
+                            # Take the longest match (first in sorted list is longest)
+                            match = matches_at_end[0]
+                            new_el = make_element(match)
+                            
+                            if is_tail:
+                                target_element.tail = text_to_check[:match.start()]
+                                parent.insert(idx, new_el)
+                            else:
+                                target_element.text = text_to_check[:match.start()]
+                                parent.insert(0, new_el)
+                            changed = True
+                            # Break to restart iteration with updated structure
+                            break
+        
+        tag_eras_before_dates(xml_root, era_pattern, make_era)
+        
+        # Second pass: Tag eras anywhere else
         replace_in_text_and_tail(xml_root, era_pattern, make_era, skip_text_tags=SKIP_TEXT_ONLY, skip_all_tags=SKIP_ALL)
 
     # Ruler Names ######################################################################################################
