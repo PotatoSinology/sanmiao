@@ -2088,7 +2088,6 @@ def extract_date_table_bulk(
         non_empty_results = [df for df in all_results if not df.empty]
         if non_empty_results:
             output_df = pd.concat(non_empty_results, ignore_index=True)
-            # Deduplicate by (ruler_id, dyn_id), preferring specific era_id over null and earliest era when multiple exist.
             # Final deduplication by (ruler_id, era_id, dyn_id) removes exact duplicates.
             if all(col in output_df.columns for col in ['ruler_id', 'era_id', 'dyn_id']):
                 # Sort so rows with non-null era_id come first (for each ruler_id, dyn_id group)
