@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-01-28
+
+### Changed
+- Added relative date tagging and basic interpretation.
+- Tag 改元 and relational prefixes as protected XML nodes.
+- Add suffix-aware era selection (early/late/single-era) and interpret era 初 as year=1.
+- Add tpq/taq filtering to reporting when candidates exceed limit (15)
+- Implement two-pass era tagging to prioritize eras before date elements
+- Add era_prefix_only ruler tags for abbreviated posthumous names
+
 ## [0.2.1] - 2025-01-19
 
 ### Changed
@@ -61,8 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.1 (2026-01-19)...HEAD
-[0.2.1]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.0...v0.2.1 (2026-01-19)
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.2 (2026-01-28)...HEAD
+[0.2.2]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.0...v0.2.2 (2026-01-28)
+[0.2.1]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.6...v0.1.7
