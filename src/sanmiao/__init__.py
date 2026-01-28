@@ -1,4 +1,4 @@
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 # Import from modules
 from .converters import gz_year, jdn_to_gz, ganshu, numcon, iso_to_jdn, jdn_to_iso

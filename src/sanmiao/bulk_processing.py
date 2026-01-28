@@ -419,7 +419,10 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
     mask_no_attr = out['intercalary'].isna()
     
     if 'has_int' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "intercalary"] = out.loc[mask_no_attr, "has_int"].replace({0: None, 1: 1}).infer_objects(copy=False)
+        # Future-proof: avoid deprecated downcasting in replace
+        # Use map instead of replace to avoid downcasting warnings
+        intercalary_values = out.loc[mask_no_attr, "has_int"].map({0: None, 1: 1})
+        out.loc[mask_no_attr, "intercalary"] = intercalary_values
     
     # Normalize date_string: remove all spaces from Chinese text
     if "date_string" in out.columns:
@@ -2087,7 +2090,42 @@ def extract_date_table_bulk(
         # Combine all results
         non_empty_results = [df for df in all_results if not df.empty]
         if non_empty_results:
-            output_df = pd.concat(non_empty_results, ignore_index=True)
+            # Future-proof: ensure consistent columns and dtypes before concat
+            # Get all unique columns from all dataframes (preserve order from first non-empty df)
+            all_columns = list(non_empty_results[0].columns)
+            for df in non_empty_results[1:]:
+                for col in df.columns:
+                    if col not in all_columns:
+                        all_columns.append(col)
+            
+            # Ensure all dataframes have the same columns with consistent dtypes
+            normalized_results = []
+            for df in non_empty_results:
+                df_normalized = df.copy()
+                for col in all_columns:
+                    if col not in df_normalized.columns:
+                        df_normalized[col] = pd.NA
+                # Reorder columns to match the order we determined
+                df_normalized = df_normalized.reindex(columns=all_columns)
+                normalized_results.append(df_normalized)
+            
+            # Future-proof: ensure consistent dtypes for numeric columns before concat
+            # This prevents dtype inference issues and merge errors
+            numeric_cols = ['era_id', 'ruler_id', 'dyn_id', 'year', 'sex_year', 'month', 
+                           'intercalary', 'day', 'jdn', 'ind_year', 'cal_stream', 
+                           'gz', 'lp', 'nmd_gz', 'nmd_jdn', 'hui_jdn', 'max_day']
+            for df in normalized_results:
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Use concat with sort=False to preserve column order
+            # Suppress the FutureWarning about empty/all-NA entries by ensuring consistent dtypes
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=FutureWarning, 
+                                      message='.*DataFrame concatenation with empty or all-NA entries.*')
+                output_df = pd.concat(normalized_results, ignore_index=True, sort=False)
             # Final deduplication by (ruler_id, era_id, dyn_id) removes exact duplicates.
             if all(col in output_df.columns for col in ['ruler_id', 'era_id', 'dyn_id']):
                 # Sort so rows with non-null era_id come first (for each ruler_id, dyn_id group)
@@ -2096,6 +2134,11 @@ def extract_date_table_bulk(
                 # Merge era_start_jdn from era_df to sort by earliest era when available
                 if 'era_start_jdn' not in output_df.columns and era_df is not None and 'era_start_jdn' in era_df.columns:
                     era_lookup = era_df[['era_id', 'era_start_jdn']].drop_duplicates(subset=['era_id'])
+                    # Ensure era_id has consistent dtype for merge (convert both to numeric)
+                    if 'era_id' in output_df.columns:
+                        output_df['era_id'] = pd.to_numeric(output_df['era_id'], errors='coerce')
+                    if 'era_id' in era_lookup.columns:
+                        era_lookup['era_id'] = pd.to_numeric(era_lookup['era_id'], errors='coerce')
                     output_df = output_df.merge(era_lookup, on='era_id', how='left', suffixes=('', '_lookup'))
                     # Use the merged column if it exists, otherwise keep original (if it was already there)
                     if 'era_start_jdn_lookup' in output_df.columns:
