@@ -1,5 +1,3 @@
-import json
-import os
 import re
 import numpy as np
 import pandas as pd
@@ -17,18 +15,6 @@ from .solving import (
     solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints,
     add_jdn_and_iso_to_proliferate_candidates
 )
-
-
-def _slog(message: str, data: dict) -> None:
-    """Append one JSON line to SANMIAO_DEBUG_LOG when set (for instrumentation)."""
-    log_path = os.environ.get("SANMIAO_DEBUG_LOG")
-    if not log_path:
-        return
-    try:
-        with open(log_path, "a") as f:
-            f.write(json.dumps({"hypothesisId": "sanmiao", "message": message, "data": data, "sessionId": "debug-session"}) + "\n")
-    except Exception:
-        pass
 
 
 # Helper functions to reduce redundancy
@@ -1614,7 +1600,6 @@ def extract_date_table_bulk(
     
     # Step 1: Extract table
     df = dates_xml_to_df(xml_root, attributes=attributes)
-    _slog("after_dates_xml_to_df", {"n_rows": len(df), "n_date_indices": int(df["date_index"].nunique()) if not df.empty and "date_index" in df.columns else 0})
     df['lunar_solution'] = 1
     
     if df.empty:
@@ -1659,12 +1644,11 @@ def extract_date_table_bulk(
         all_date_indices = [x for x in all_date_indices if pd.notna(x)]
         if post_normalisation_func is not None:
             df = post_normalisation_func(df)
-        _slog("after_post_norm", {"n_rows": len(df), "n_all_date_indices": len(all_date_indices)})
-        
+
         # Step 6: Bulk generate candidates (Phase 2)
         df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
-        _slog("after_bulk_candidates", {"n_rows": len(df_candidates), "n_date_indices": int(df_candidates["date_index"].nunique()) if not df_candidates.empty and "date_index" in df_candidates.columns else 0})
         df_candidates['error_str'] = ""
+        
         #############################################################################
         all_results = []
         # Track previous date's results to check if it had multiple solved options
@@ -2114,7 +2098,6 @@ def extract_date_table_bulk(
             
             # Update previous date_index for next iteration
             prev_date_idx = date_idx
-        _slog("after_loop", {"n_result_frames": len(all_results), "total_output_rows": sum(len(r) for r in all_results)})
         # Combine all results
         non_empty_results = [df for df in all_results if not df.empty]
         if non_empty_results:
