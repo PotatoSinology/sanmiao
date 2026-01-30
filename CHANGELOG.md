@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Era and ruler resolution already restricted by dynasty (`bulk_resolve_era_ids` by `dyn_id`, `bulk_resolve_ruler_ids` by `ruler_df`); pipeline now applies dynasty-mismatch detection and XML/table correction after resolution so bad dynasty+era/ruler pairs are fixed and remaining dates are solved.
+- **Dynasty-mismatch era compatibility:** Before ejecting a dynasty, we check whether the era belongs to a dynasty whose tag (or whose parent’s tag via `part_of`) exactly equals `dyn_str`. Uses `filter_dynasty_mismatch_era_compatible` with `era_df`, `dyn_tag_df`, and `dyn_df` (for `part_of`). Avoids falsely ejecting 漢永平 (永平 under 東漢 46, 46 part_of 42, tag 漢 = 42) and 魏永平 (永平 under 北魏 89, tag 魏 = 89); compatibility is exact tag match only.
+- **Dynasty + suffix only:** In `bulk_resolve_dynasty_ids`, we no longer expand to child dynasties (part_of) when the date has only dynasty + suffix (no era_str, no ruler_str). So 晉時 resolves to 晉 (51) only, not 西晉/東晉 (52, 53). Expansion to children still happens when the date has era or ruler context.
 
 ## [0.2.3] - 2025-01-90
 
