@@ -1,3 +1,5 @@
+import json
+import os
 import re
 import numpy as np
 import pandas as pd
@@ -15,6 +17,19 @@ from .solving import (
     solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints,
     add_jdn_and_iso_to_proliferate_candidates
 )
+
+
+def _slog(message: str, data: dict) -> None:
+    """Append one JSON line to SANMIAO_DEBUG_LOG when set (for instrumentation)."""
+    log_path = os.environ.get("SANMIAO_DEBUG_LOG")
+    if not log_path:
+        return
+    try:
+        with open(log_path, "a") as f:
+            f.write(json.dumps({"hypothesisId": "sanmiao", "message": message, "data": data, "sessionId": "debug-session"}) + "\n")
+    except Exception:
+        pass
+
 
 # Helper functions to reduce redundancy
 
@@ -1599,7 +1614,7 @@ def extract_date_table_bulk(
     
     # Step 1: Extract table
     df = dates_xml_to_df(xml_root, attributes=attributes)
-
+    _slog("after_dates_xml_to_df", {"n_rows": len(df), "n_date_indices": int(df["date_index"].nunique()) if not df.empty and "date_index" in df.columns else 0})
     df['lunar_solution'] = 1
     
     if df.empty:
@@ -1630,7 +1645,6 @@ def extract_date_table_bulk(
         df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
         df = bulk_resolve_ruler_ids(df, ruler_tag_df)
         df = bulk_resolve_era_ids(df, era_df)
-        
         # Save copy after ID resolution but before post_normalisation_func
         df_after_resolution = df.copy()
         
@@ -1645,13 +1659,14 @@ def extract_date_table_bulk(
         all_date_indices = [x for x in all_date_indices if pd.notna(x)]
         if post_normalisation_func is not None:
             df = post_normalisation_func(df)
+        _slog("after_post_norm", {"n_rows": len(df), "n_all_date_indices": len(all_date_indices)})
         
         # Step 6: Bulk generate candidates (Phase 2)
         df_candidates = bulk_generate_date_candidates(df, dyn_df, ruler_df, era_df, master_table, lunar_table, phrase_dic=phrase_dic_en, tpq=tpq, taq=taq, civ=civ, proliferate=proliferate)
+        _slog("after_bulk_candidates", {"n_rows": len(df_candidates), "n_date_indices": int(df_candidates["date_index"].nunique()) if not df_candidates.empty and "date_index" in df_candidates.columns else 0})
         df_candidates['error_str'] = ""
         #############################################################################
         all_results = []
-        
         # Track previous date's results to check if it had multiple solved options
         prev_date_idx = None
         prev_date_results = None
@@ -1659,7 +1674,6 @@ def extract_date_table_bulk(
         # Group by date_index and process sequentially [sex_year is fine at this point]
         for date_idx in all_date_indices:
             # Reset implied state for each date if not sequential
-            
             # Check if previous date had multiple solved results - if so, reset implied state
             # because we can't reliably carry forward ambiguous information
             if sequential and prev_date_idx is not None and prev_date_results is not None:
@@ -1703,7 +1717,7 @@ def extract_date_table_bulk(
             if original_rows.empty:
                 continue
             original_row = original_rows.iloc[0]
-
+            
             # -----------------------------------------------------------------
             # Relative-year markers (明年/去年/前…/後… + 年/歲) indicate a shift in
             # narrative time. In sequential mode, we should NOT carry forward
@@ -1783,7 +1797,6 @@ def extract_date_table_bulk(
             else:
                 g = df_candidates[df_candidates['date_index'] == date_idx].copy()
             no_candidates_generated = False
-            
 
             if g.empty:
                 # If no candidates were generated, create a fallback row from original df
@@ -1867,7 +1880,6 @@ def extract_date_table_bulk(
                         if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
                             g['intercalary'] = implied['intercalary']
                         has_month = True
-
             # -----------------------------------------------------------------
             # Sequential relative-year handling (year/歲 only)
             #
@@ -1894,13 +1906,12 @@ def extract_date_table_bulk(
                 rel_unit in ('年', '歲') and
                 rel_dir in relative_year_offsets
             )
-
+            
             if is_relative_year:
                 # Add warning (propagate through solving)
                 if 'error_str' not in g.columns:
                     g['error_str'] = ""
                 g['error_str'] = g['error_str'].fillna("") + "relative date; "
-
                 # Apply anchor-year filtering only in sequential mode when we have an anchor
                 anchor_ind_year = implied.get('ind_year') if sequential else None
                 if anchor_ind_year is not None:
@@ -1943,7 +1954,6 @@ def extract_date_table_bulk(
             # If date has temporal constraints but no era/dynasty/ruler context, report insufficient information
             has_temporal_constraints = has_year or has_sex_year or has_month or has_day or has_gz or has_lp or has_nmd_gz
             has_context = False
-            
             if has_temporal_constraints and no_candidates_generated:
                 # Check if we have era/dynasty/ruler context (either explicit or from implied, after applying implied)
                 has_era = ('era_id' in g.columns and g['era_id'].notna().any()) or (implied.get('era_id_ls') and len(implied['era_id_ls']) > 0)
@@ -1963,7 +1973,6 @@ def extract_date_table_bulk(
                     prev_date_results = result_df
                     prev_date_idx = date_idx
                     continue
-            
             # Determine date type
             is_simple = not has_year and not has_sex_year and not has_month and not has_day and not has_gz and not has_lp and not has_nmd_gz
             # Solve based on date type
@@ -1980,7 +1989,6 @@ def extract_date_table_bulk(
                         g, implied, era_df, phrase_dic, tpq, taq,
                         has_month, has_day, has_gz, has_lp
                     )
-                
                 # Separate into those needing lunar solution and those not needing lunar solution
                 g_a = g[g['lunar_solution'] == 1].copy()
                 result_df_a = pd.DataFrame()
@@ -2003,7 +2011,6 @@ def extract_date_table_bulk(
                 if not result_df_b.empty:
                     result_df_b = add_jdn_and_iso_to_proliferate_candidates(result_df_b, pg=pg, gs=gs)
                 to_concat = [i for i in [result_df_a, result_df_b] if not i.empty]
-                
                 # If lunar constraints resulted in no matches (likely due to corruption),
                 # use the original input dataframe instead of empty
                 if len(to_concat) == 0:
@@ -2020,9 +2027,10 @@ def extract_date_table_bulk(
                         result_df['error_str'] += phrase_dic.get('lunar-constraint-failed', 'Lunar constraint solving failed; ')
                 else:
                     result_df = pd.concat(to_concat)
-                    # Add metadata to result_df if not empty
-                    if 'cal_stream' in result_df.columns and 'ind_year' in result_df.columns:
-                        result_df = result_df.sort_values(by=['cal_stream', 'ind_year'])
+                    # Sort by calendar/year when present (not every result has cal_stream and ind_year)
+                    sort_cols = [c for c in ['cal_stream', 'ind_year'] if c in result_df.columns]
+                    if sort_cols:
+                        result_df = result_df.sort_values(by=sort_cols)
                 del g_a, result_df_a, result_df_b
                     
             else:
@@ -2106,7 +2114,7 @@ def extract_date_table_bulk(
             
             # Update previous date_index for next iteration
             prev_date_idx = date_idx
-        
+        _slog("after_loop", {"n_result_frames": len(all_results), "total_output_rows": sum(len(r) for r in all_results)})
         # Combine all results
         non_empty_results = [df for df in all_results if not df.empty]
         if non_empty_results:
@@ -2164,22 +2172,36 @@ def extract_date_table_bulk(
                     if 'era_start_jdn_lookup' in output_df.columns:
                         output_df['era_start_jdn'] = output_df['era_start_jdn_lookup']
                         output_df = output_df.drop(columns=['era_start_jdn_lookup'], errors='ignore')
-                
                 # Sort by (ruler_id, dyn_id, era_id_is_null, era_start_jdn) to prefer non-null era_id and earliest era
                 if 'era_start_jdn' in output_df.columns:
                     output_df = output_df.sort_values(by=['ruler_id', 'dyn_id', '_era_id_is_null', 'era_start_jdn'], ascending=[True, True, True, True]).reset_index(drop=True)
                 else:
                     # Fallback: sort by era_id if era_start_jdn not available
                     output_df = output_df.sort_values(by=['ruler_id', 'dyn_id', '_era_id_is_null', 'era_id'], ascending=[True, True, True, True]).reset_index(drop=True)
-                
-                # Deduplicate by (ruler_id, dyn_id), keeping first (which prefers non-null era_id and earliest era)
-                output_df = output_df.drop_duplicates(subset=['ruler_id', 'dyn_id'], keep='first').reset_index(drop=True)
-                
+                # Deduplicate by (ruler_id, dyn_id) within each date_index bloc, keeping first (prefers non-null era_id and earliest era)
+                if 'date_index' in output_df.columns:
+                    _date_index = output_df['date_index'].copy()
+                    output_df = output_df.groupby('date_index', group_keys=False).apply(
+                        lambda g: g.drop_duplicates(subset=['ruler_id', 'dyn_id'], keep='first'),
+                        include_groups=False,
+                    )
+                    output_df['date_index'] = _date_index.reindex(output_df.index).values
+                    output_df = output_df.reset_index(drop=True)
+                else:
+                    output_df = output_df.drop_duplicates(subset=['ruler_id', 'dyn_id'], keep='first').reset_index(drop=True)
                 # Drop the temporary column
                 output_df = output_df.drop(columns=['_era_id_is_null'], errors='ignore')
-                
-                # Final deduplication by (ruler_id, era_id, dyn_id) to remove any remaining exact duplicates
-                output_df = output_df.drop_duplicates(subset=['ruler_id', 'era_id', 'dyn_id'], keep='first').reset_index(drop=True)
+                # Final deduplication by (ruler_id, era_id, dyn_id) within each date_index bloc
+                if 'date_index' in output_df.columns:
+                    _date_index = output_df['date_index'].copy()
+                    output_df = output_df.groupby('date_index', group_keys=False).apply(
+                        lambda g: g.drop_duplicates(subset=['ruler_id', 'era_id', 'dyn_id'], keep='first'),
+                        include_groups=False,
+                    )
+                    output_df['date_index'] = _date_index.reindex(output_df.index).values
+                    output_df = output_df.reset_index(drop=True)
+                else:
+                    output_df = output_df.drop_duplicates(subset=['ruler_id', 'era_id', 'dyn_id'], keep='first').reset_index(drop=True)
             else:
                 dup_cols = []
                 for col in ['ruler_id', 'era_id', 'dyn_id']:
