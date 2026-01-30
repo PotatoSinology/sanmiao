@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Dynasty-mismatch validation and XML correction.** When dynasty-restricted resolution finds no valid era_id or ruler_id for a date (e.g. false pair 清+太上), the pipeline now:
+  - Detects such date_indices (`detect_dynasty_mismatch_indices`) and fixes the XML via `fix_dynasty_mismatch_xml`: moves `<dyn>` content out of the `<date>` element, then runs `remove_lone_tags` so dates left with only era/ruler are stripped.
+  - Drops from the extracted table only date_indices that were actually removed from the XML (`date_indices_in_xml_string`); for dates that remain (e.g. era+year), clears `dyn_id` and re-resolves era/ruler without dynasty restriction so they are solved (e.g. 太康二年 → Jin and Liao candidates).
+- New helper `date_indices_in_xml_string()` in `xml_utils` to report which date indices still exist in an XML string after correction.
+
+### Changed
+- Era and ruler resolution already restricted by dynasty (`bulk_resolve_era_ids` by `dyn_id`, `bulk_resolve_ruler_ids` by `ruler_df`); pipeline now applies dynasty-mismatch detection and XML/table correction after resolution so bad dynasty+era/ruler pairs are fixed and remaining dates are solved.
+
 ## [0.2.3] - 2025-01-90
 
 ### Fixed
