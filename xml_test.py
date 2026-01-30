@@ -22,7 +22,7 @@ def my_post_normalize(df):
 
 
 # Extract and resolve dates using optimized bulk function
-xml_string, output_df, implied = extract_date_table_bulk(
+xml_string, output_df, implied, _ = extract_date_table_bulk(
     ui, sequential=True, proliferate=False, attributes=True, 
     post_normalisation_func=None
 )

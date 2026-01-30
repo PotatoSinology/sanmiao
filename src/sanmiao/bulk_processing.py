@@ -170,6 +170,80 @@ def detect_dynasty_mismatch_indices(df):
     return set(df.loc[mismatch, 'date_index'].dropna().unique().tolist())
 
 
+def filter_dynasty_mismatch_era_compatible(mismatch_indices, df, era_df, dyn_tag_df, dyn_df=None):
+    """
+    Remove from mismatch_indices any date_index where the era_str matches an era
+    whose dynasty (or the dynasty it belongs to via part_of) has a tag that
+    exactly equals dyn_str. E.g. era 永平 under dyn_id 46 (東漢); 46 has part_of 42;
+    dynasty_tags has 漢 → 42; so dyn_str "漢" is compatible.
+
+    :param mismatch_indices: set of date_index from detect_dynasty_mismatch_indices
+    :param df: DataFrame with dyn_str, era_str, date_index (after resolution)
+    :param era_df: DataFrame with era_name, dyn_id
+    :param dyn_tag_df: DataFrame with string (tag), dyn_id
+    :param dyn_df: Optional DataFrame with dyn_id, part_of (dynasty it belongs to)
+    :return: subset of mismatch_indices to treat as true mismatch
+    """
+    if not mismatch_indices or 'era_str' not in df.columns or 'dyn_str' not in df.columns:
+        return mismatch_indices
+    if 'era_name' not in era_df.columns or 'dyn_id' not in era_df.columns:
+        return mismatch_indices
+    if 'string' not in dyn_tag_df.columns or 'dyn_id' not in dyn_tag_df.columns:
+        return mismatch_indices
+    needed = era_df[['era_name', 'dyn_id']].drop_duplicates()
+    tags_by_dyn = dyn_tag_df[['string', 'dyn_id']].drop_duplicates()
+    # Build dyn_id -> part_of (parent dynasty) from dyn_df
+    part_of_map = {}
+    if dyn_df is not None and 'dyn_id' in dyn_df.columns and 'part_of' in dyn_df.columns:
+        for _, r in dyn_df[['dyn_id', 'part_of']].drop_duplicates().iterrows():
+            if pd.notna(r['dyn_id']) and pd.notna(r['part_of']):
+                try:
+                    part_of_map[int(r['dyn_id'])] = int(r['part_of'])
+                except (ValueError, TypeError):
+                    pass
+    out = set()
+    for date_idx in mismatch_indices:
+        rows = df[df['date_index'] == date_idx]
+        if rows.empty:
+            out.add(date_idx)
+            continue
+        row = rows.iloc[0]
+        dyn_str = row.get('dyn_str')
+        era_str = row.get('era_str')
+        if pd.isna(era_str) or pd.isna(dyn_str):
+            out.add(date_idx)
+            continue
+        dyn_str = str(dyn_str).strip()
+        era_str = str(era_str).strip()
+        if not dyn_str or not era_str:
+            out.add(date_idx)
+            continue
+        eras = needed[needed['era_name'] == era_str]
+        if eras.empty:
+            out.add(date_idx)
+            continue
+        era_dyn_ids = set()
+        for x in eras['dyn_id'].dropna().unique():
+            try:
+                era_dyn_ids.add(int(x))
+            except (ValueError, TypeError):
+                pass
+        # Include part_of for each era dyn_id so tags for parent dynasty count (e.g. 46 → 42)
+        if part_of_map:
+            for did in list(era_dyn_ids):
+                if did in part_of_map:
+                    era_dyn_ids.add(part_of_map[did])
+        tags = tags_by_dyn[tags_by_dyn['dyn_id'].isin(era_dyn_ids)]
+        if tags.empty:
+            out.add(date_idx)
+            continue
+        # Compatible only if some tag exactly equals dyn_str
+        if (tags['string'].astype(str).str.strip() == dyn_str).any():
+            continue
+        out.add(date_idx)
+    return out
+
+
 def clear_preliminary_errors(result_df):
     """
     Clear preliminary error messages from successfully resolved dates.
@@ -522,53 +596,66 @@ def bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df):
     if 'string' in dyn_merge.columns:
         dyn_merge = dyn_merge.drop(columns=['string'])
     
-    # Step 2: Handle part_of relationships
-    # Find all dyn_ids that matched directly
+    # Date indices that have era or ruler context: only then expand to child dynasties (part_of).
+    # For dynasty + suffix only (e.g. 晉時), keep only the directly matched dynasty (晉), not 西晉/東晉.
+    date_index_expand_children = set()
+    if 'date_index' in out.columns:
+        has_era = (
+            out['era_str'].notna() & (out['era_str'].astype(str).str.strip() != '')
+            if 'era_str' in out.columns else pd.Series(False, index=out.index)
+        )
+        has_ruler = (
+            out['ruler_str'].notna() & (out['ruler_str'].astype(str).str.strip() != '')
+            if 'ruler_str' in out.columns else pd.Series(False, index=out.index)
+        )
+        date_index_expand_children = set(out.loc[has_era | has_ruler, 'date_index'].dropna().unique())
+
+    # Step 2: Handle part_of relationships (add child dynasties only when date has era/ruler context)
     matched_dyn_ids = dyn_merge['dyn_id'].dropna().unique()
-    
-    # Find dynasties that have these matched IDs as their 'part_of'
-    # This means if we matched "Tang", we also want "Later Tang" (if part_of = Tang)
     if len(matched_dyn_ids) > 0 and 'part_of' in dyn_df.columns:
         part_of_dyns = dyn_df[dyn_df['part_of'].isin(matched_dyn_ids)][['dyn_id', 'part_of']].copy()
-        
         if not part_of_dyns.empty:
-            # Create additional rows for part_of relationships
-            # For each original match, add rows for dynasties that have it as part_of
             part_of_rows = []
             for _, row in dyn_merge.iterrows():
                 if pd.notna(row['dyn_id']):
-                    # Find dynasties that have this dyn_id as their part_of
+                    # Only expand to children when this date has era or ruler (not dynasty+suffix only)
+                    try:
+                        di = row['date_index']
+                        if di not in date_index_expand_children:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
                     related = part_of_dyns[part_of_dyns['part_of'] == row['dyn_id']]
                     if not related.empty:
-                        # Create a row for each related dynasty
                         for _, rel_row in related.iterrows():
                             new_row = row.copy()
                             new_row['dyn_id'] = rel_row['dyn_id']
                             part_of_rows.append(new_row)
-            
             if part_of_rows:
                 part_of_df = pd.DataFrame(part_of_rows)
-                # Combine original matches with part_of matches
                 dyn_merge = pd.concat([dyn_merge, part_of_df], ignore_index=True)
     
     # Step 3: Also include the part_of values themselves if they're in dyn_df
-    # This handles the reverse: if we matched "Later Tang", include "Tang" too
+    # (If we matched "西晉", include "晉" too.) Only when date has era/ruler context;
+    # for dynasty + suffix only (e.g. 西晉之末), keep only the matched dynasty (西晉).
     if len(matched_dyn_ids) > 0 and 'part_of' in dyn_df.columns:
-        # Get dyn_ids that matched and find their part_of values
         matched_with_part_of = dyn_df[dyn_df['dyn_id'].isin(matched_dyn_ids) & dyn_df['part_of'].notna()]
         if not matched_with_part_of.empty:
             part_of_values = matched_with_part_of[['dyn_id', 'part_of']].copy()
-            # For each matched dynasty with a part_of, add a row with part_of as dyn_id
             part_of_reverse_rows = []
             for _, row in dyn_merge.iterrows():
                 if pd.notna(row['dyn_id']):
+                    try:
+                        if row['date_index'] not in date_index_expand_children:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
                     parent_dyns = part_of_values[part_of_values['dyn_id'] == row['dyn_id']]
                     for _, parent_row in parent_dyns.iterrows():
                         if pd.notna(parent_row['part_of']):
                             new_row = row.copy()
                             new_row['dyn_id'] = parent_row['part_of']
                             part_of_reverse_rows.append(new_row)
-            
             if part_of_reverse_rows:
                 part_of_reverse_df = pd.DataFrame(part_of_reverse_rows)
                 dyn_merge = pd.concat([dyn_merge, part_of_reverse_df], ignore_index=True)
@@ -1630,7 +1717,7 @@ def extract_date_table_bulk(
     :param sequential: bool, intelligently forward fills missing date elements from previous Sinitic date string
     :param proliferate: bool, finds all candidates for date strings without dynasty, ruler, or era
     :param attributes: bool, if True, extract attributes from <date> elements when df is None
-    :return: tuple (xml_string, output_df, implied) - same format as extract_date_table()
+    :return: tuple (xml_string, output_df, implied, xml_modified) - xml_modified is True when dynasty-mismatch fix was applied
     """
     # Defaults
     gs, civ = normalize_defaults(gs, civ)
@@ -1695,10 +1782,12 @@ def extract_date_table_bulk(
         df_after_resolution = df.copy()
 
         # Dynasty mismatch: dyn_str + era_str/ruler_str but no era_id/ruler_id after
-        # dynasty-restricted resolution. Fix XML (move <dyn> out, remove_lone_tags).
-        # Only drop date_indices that were actually removed from the XML; for dates
-        # that remain (e.g. era+year), clear dyn_id and re-resolve era/ruler so they get solved.
+        # dynasty-restricted resolution. Exclude cases where era's dynasty has a tag
+        # that exactly equals dyn_str (e.g. 永平 under dyn_id 89, tag 魏). Then fix XML.
         mismatch_indices = detect_dynasty_mismatch_indices(df_after_resolution)
+        mismatch_indices = filter_dynasty_mismatch_era_compatible(
+            mismatch_indices, df_after_resolution, era_df, dyn_tag_df, dyn_df
+        )
         if mismatch_indices:
             modified_xml_string = fix_dynasty_mismatch_xml(
                 et.tostring(xml_root, encoding='unicode', method='xml'),
@@ -2283,10 +2372,11 @@ def extract_date_table_bulk(
         else:
             output_df = pd.DataFrame()
 
-    # Return XML string (use dynasty-mismatch fixed version when applied) and output dataframe
+    # Return XML string (use dynasty-mismatch fixed version when applied), output dataframe, implied, and whether XML was modified
     xml_string = (
         modified_xml_string
         if modified_xml_string is not None
         else et.tostring(xml_root, encoding='utf8').decode('utf8')
     )
-    return xml_string, output_df, implied
+    xml_modified = modified_xml_string is not None
+    return xml_string, output_df, implied, xml_modified

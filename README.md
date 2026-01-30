@@ -80,7 +80,7 @@ xml_root = strip_text(xml_root)
 tables = prepare_tables(civ=civ)
 
 # Extract dates using optimized bulk function
-xml_string, output_df, implied = extract_date_table_bulk(
+xml_string, output_df, implied, xml_modified = extract_date_table_bulk(
     xml_root, implied=implied, pg=pg, gs=gs, lang=lang,
     tpq=tpq, taq=taq, civ=civ, tables=tables, sequential=sequential, proliferate=not sequential
 )
