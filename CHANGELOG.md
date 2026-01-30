@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.2] - 2025-01-28
 
 ### Changed
+- Added cache-control meta tags and a version-aware sessionStorage reloading check so browsers always fetch the freshest frontend bundle.
 - Added relative date tagging and basic interpretation.
 - Tag 改元 and relational prefixes as protected XML nodes.
 - Add suffix-aware era selection (early/late/single-era) and interpret era 初 as year=1.
@@ -71,8 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.2 (2026-01-28)...HEAD
-[0.2.2]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.0...v0.2.2 (2026-01-28)
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.7...v0.1.8
