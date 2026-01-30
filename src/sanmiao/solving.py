@@ -262,6 +262,16 @@ def solve_date_with_year(g, implied, era_df, phrase_dic=phrase_dic_en, tpq=DEFAU
                 df['era_end_year'] = era_info['era_end_year']
                 df['max_year'] = era_info['max_year']
                 df['era_name'] = era_info['era_name']
+        # If we have era_id but era_start_year is missing or all NaN, look up from era_df (normal place for ind_year)
+        elif 'era_id' in df.columns and df['era_id'].notna().any():
+            need_era = 'era_start_year' not in df.columns or df['era_start_year'].isna().all()
+            if need_era and 'era_id' in era_df.columns and 'era_start_year' in era_df.columns:
+                era_lookup = era_df[['era_id', 'era_start_year']].drop_duplicates(subset=['era_id'])
+                if 'era_end_year' in era_df.columns:
+                    era_lookup = era_lookup.merge(era_df[['era_id', 'era_end_year']].drop_duplicates(subset=['era_id']), on='era_id')
+                if 'max_year' in era_df.columns:
+                    era_lookup = era_lookup.merge(era_df[['era_id', 'max_year']].drop_duplicates(subset=['era_id']), on='era_id')
+                df = df.merge(era_lookup, on='era_id', how='left')
         
         # Filter by max_year (era must have lasted at least this many years)
         if 'max_year' in df.columns:
