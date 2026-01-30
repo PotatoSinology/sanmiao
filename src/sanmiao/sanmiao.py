@@ -126,7 +126,7 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                     xml_root, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, 
                     civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
                 )
-
+                print(xml_string)
                 # Extract tables for canonical name addition
                 era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
 

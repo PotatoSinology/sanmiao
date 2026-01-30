@@ -91,6 +91,96 @@ def remove_lone_tags(xml_string: str) -> et._Element:
     return xml_root
 
 
+def fix_dynasty_mismatch_xml(xml_string: str, mismatch_date_indices: set) -> str:
+    """
+    For date elements whose index is in mismatch_date_indices, move <dyn> content
+    out of the <date> (so the dynasty text becomes preceding sibling text), then
+    run remove_lone_tags so that dates left with only era/ruler get stripped.
+
+    Used when dynasty-restricted resolution found no valid era_id/ruler_id:
+    the dynasty string (e.g. 清) is moved out so the leftover <date> can be
+    removed by remove_lone_tags, and the table rows for these indices are
+    dropped by the caller.
+
+    :param xml_string: Full document XML string
+    :param mismatch_date_indices: Set of date_index values (int or str) to fix
+    :return: Modified XML string
+    """
+    if not mismatch_date_indices:
+        return xml_string
+    try:
+        root = et.fromstring(xml_string.encode('utf-8'))
+    except et.ParseError:
+        return xml_string
+
+    # Normalise to set of strings for attribute comparison (XML @index is often string)
+    mismatch_str = {str(i) for i in mismatch_date_indices}
+
+    for node in root.iter():
+        tag = node.tag.split('}')[-1] if '}' in node.tag else node.tag
+        if tag != 'date':
+            continue
+        idx = node.get('index')
+        if idx is None or str(idx) not in mismatch_str:
+            continue
+        # Find <dyn> child (namespace-agnostic)
+        dyn = None
+        for child in node:
+            ctag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+            if ctag == 'dyn':
+                dyn = child
+                break
+        if dyn is None:
+            continue
+        # Full text of dyn (string value) plus any tail after </dyn>
+        dyn_text = (dyn.xpath('string()') or '').strip() + (dyn.tail or '')
+        # Insert dyn text before <date>
+        prev = node.getprevious()
+        if prev is not None:
+            prev.tail = (prev.tail or '') + dyn_text
+        else:
+            parent = node.getparent()
+            if parent is not None:
+                parent.text = (parent.text or '') + dyn_text
+        # Remove the <dyn> element (and its tail, which we already moved)
+        dyn.tail = None
+        node.remove(dyn)
+
+    new_str = et.tostring(root, encoding='unicode', method='xml')
+    root2 = remove_lone_tags(new_str)
+    return et.tostring(root2, encoding='unicode', method='xml')
+
+
+def date_indices_in_xml_string(xml_string: str) -> set:
+    """
+    Return the set of date @index values (as numbers) still present in the XML.
+    Used after fix_dynasty_mismatch_xml to know which date_indices were kept
+    vs removed by remove_lone_tags.
+
+    :param xml_string: Full document XML string
+    :return: Set of numeric index values (int/float, NaN discarded)
+    """
+    try:
+        root = et.fromstring(xml_string.encode('utf-8'))
+    except et.ParseError:
+        return set()
+    out = set()
+    for node in root.iter():
+        tag = node.tag.split('}')[-1] if '}' in node.tag else node.tag
+        if tag != 'date':
+            continue
+        idx = node.get('index')
+        if idx is not None:
+            try:
+                out.add(int(idx))
+            except (ValueError, TypeError):
+                try:
+                    out.add(float(idx))
+                except (ValueError, TypeError):
+                    pass
+    return out
+
+
 def strip_text(xml_root: et._Element) -> et._Element:
     """
     Remove all non-date text from XML string
