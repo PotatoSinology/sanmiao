@@ -361,56 +361,76 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
         return numcon(s.rstrip('月'))
     
     if 'month' not in out.columns:
-        out['month'] = None
+        out['month'] = pd.Series(index=out.index, dtype='float64')
+    else:
+        out['month'] = pd.to_numeric(out['month'], errors='coerce')
     
     mask_no_attr = out['month'].isna()
     
     if 'month_str' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "month"] = out.loc[mask_no_attr, "month_str"].map(month_to_int)
+        month_values = out.loc[mask_no_attr, "month_str"].map(month_to_int)
+        month_values = month_values.where(month_values.notna(), np.nan).astype('float64')
+        out.loc[mask_no_attr, "month"] = month_values
 
     # day - only process string if attribute doesn't exist or is NaN for that row
     if 'day' not in out.columns:
-        out['day'] = None
+        out['day'] = pd.Series(index=out.index, dtype='float64')
+    else:
+        out['day'] = pd.to_numeric(out['day'], errors='coerce')
     
     mask_no_attr = out['day'].isna()
     
     if 'day_str' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "day"] = out.loc[mask_no_attr, "day_str"].map(
+        day_values = out.loc[mask_no_attr, "day_str"].map(
             lambda s: numcon(s.rstrip('日')) if isinstance(s, str) and s else None
         )
+        day_values = day_values.where(day_values.notna(), np.nan).astype('float64')
+        out.loc[mask_no_attr, "day"] = day_values
 
     # gz (sexagenary day number) - only process string if attribute doesn't exist or is NaN for that row
     if 'gz' not in out.columns:
-        out['gz'] = None
+        out['gz'] = pd.Series(index=out.index, dtype='float64')
+    else:
+        out['gz'] = pd.to_numeric(out['gz'], errors='coerce')
     
     mask_no_attr = out['gz'].isna()
     
     if 'gz_str' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "gz"] = out.loc[mask_no_attr, "gz_str"].map(
+        gz_values = out.loc[mask_no_attr, "gz_str"].map(
             lambda s: ganshu(s) if isinstance(s, str) and s else None
         )
+        gz_values = gz_values.where(gz_values.notna(), np.nan).astype('float64')
+        out.loc[mask_no_attr, "gz"] = gz_values
 
     # lp - only process string if attribute doesn't exist or is NaN for that row
     if 'lp' not in out.columns:
-        out['lp'] = None
+        out['lp'] = pd.Series(index=out.index, dtype='float64')
+    else:
+        out['lp'] = pd.to_numeric(out['lp'], errors='coerce')
     
     mask_no_attr = out['lp'].isna()
     
     if 'lp_str' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "lp"] = out.loc[mask_no_attr, "lp_str"].map(
+        lp_values = out.loc[mask_no_attr, "lp_str"].map(
             lambda s: LP_DIC.get(s) if isinstance(s, str) else None
         )
+        lp_values = lp_values.where(lp_values.notna(), np.nan).astype('float64')
+        out.loc[mask_no_attr, "lp"] = lp_values
 
     # nmd_gz (next month's day sexagenary number) - only process string if attribute doesn't exist or is NaN for that row
     if 'nmd_gz' not in out.columns:
-        out['nmd_gz'] = None
+        out['nmd_gz'] = pd.Series(index=out.index, dtype='float64')
+    else:
+        out['nmd_gz'] = pd.to_numeric(out['nmd_gz'], errors='coerce')
     
     mask_no_attr = out['nmd_gz'].isna()
     
     if 'nmd_gz_str' in out.columns and mask_no_attr.any():
-        out.loc[mask_no_attr, "nmd_gz"] = out.loc[mask_no_attr, "nmd_gz_str"].map(
+        nmd_gz_values = out.loc[mask_no_attr, "nmd_gz_str"].map(
             lambda s: ganshu(s) if isinstance(s, str) and s else None
         )
+        nmd_gz_values = nmd_gz_values.where(nmd_gz_values.notna(), np.nan).astype('float64')
+        out.loc[mask_no_attr, "nmd_gz"] = nmd_gz_values
     
     # intercalary - only process has_int if attribute doesn't exist or is NaN for that row
     if 'intercalary' not in out.columns:
