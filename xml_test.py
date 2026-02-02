@@ -15,11 +15,15 @@ ui = """
 </root>
 """
 
+ui = """
+<root>
+<date index="3"><dyn>梁</dyn><era>太清</era><suffix>時</suffix></date>九道尺素隱訣
+</root>
+"""
 def my_post_normalize(df):
     df = backwards_fill_days(df)
     df = filter_annals(df)
     return df
-
 
 # Extract and resolve dates using optimized bulk function
 xml_string, output_df, implied, _ = extract_date_table_bulk(
@@ -27,4 +31,11 @@ xml_string, output_df, implied, _ = extract_date_table_bulk(
     post_normalisation_func=None
 )
 
-print(output_df[['date_string', 'dyn_id', 'ruler_id', 'era_id', 'error_str']])
+# Only select columns that exist (output_df can be empty or have different columns)
+cols = ['date_string', 'dyn_id', 'ruler_id', 'era_id', 'error_str']
+cols_present = [c for c in cols if c in output_df.columns]
+if output_df.empty:
+    print("Empty DataFrame")
+    print("Columns:", list(output_df.columns))
+else:
+    print(output_df[cols_present] if cols_present else output_df)

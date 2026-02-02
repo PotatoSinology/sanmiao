@@ -1780,7 +1780,7 @@ def extract_date_table_bulk(
         df = bulk_resolve_era_ids(df, era_df)
         # Save copy after ID resolution but before post_normalisation_func
         df_after_resolution = df.copy()
-
+        
         # Dynasty mismatch: dyn_str + era_str/ruler_str but no era_id/ruler_id after
         # dynasty-restricted resolution. Exclude cases where era's dynasty has a tag
         # that exactly equals dyn_str (e.g. 永平 under dyn_id 89, tag 魏). Then fix XML.
@@ -2312,6 +2312,25 @@ def extract_date_table_bulk(
                 warnings.filterwarnings('ignore', category=FutureWarning, 
                                       message='.*DataFrame concatenation with empty or all-NA entries.*')
                 output_df = pd.concat(normalized_results, ignore_index=True, sort=False)
+            # When a date_index has at least one solved row (era_id or ruler_id), drop unresolved
+            # rows (no era_id and no ruler_id) from dynasty expansion that failed to match.
+            if all(col in output_df.columns for col in ['ruler_id', 'era_id', 'dyn_id', 'date_index']):
+                has_era = output_df['era_id'].notna()
+                has_ruler = output_df['ruler_id'].notna()
+                solved = has_era | has_ruler
+                unresolved = ~has_era & ~has_ruler
+                if unresolved.any() and solved.any():
+                    def _drop_unresolved_when_solved(g):
+                        if g['solved'].any():
+                            return g[g['solved']].drop(columns=['solved'], errors='ignore')
+                        return g.drop(columns=['solved'], errors='ignore')
+                    output_df['solved'] = solved
+                    _date_index = output_df['date_index'].copy()
+                    output_df = output_df.groupby('date_index', group_keys=False).apply(
+                        _drop_unresolved_when_solved, include_groups=False
+                    )
+                    output_df['date_index'] = _date_index.reindex(output_df.index).values
+                    output_df = output_df.reset_index(drop=True)
             # Final deduplication by (ruler_id, era_id, dyn_id) removes exact duplicates.
             if all(col in output_df.columns for col in ['ruler_id', 'era_id', 'dyn_id']):
                 # Sort so rows with non-null era_id come first (for each ruler_id, dyn_id group)
