@@ -54,7 +54,7 @@ def jdn_to_gz(jdn: int, en: bool = False) -> str:
     return gz
 
 
-def ganshu(gz_in, en=False):
+def ganshu(gz_in, en=False, modulo=False):
     """
     Convert from sexagenary counter (string) to number (int) and vice versa.
     :param gz_in: str, int, or float
@@ -86,6 +86,8 @@ def ganshu(gz_in, en=False):
     # number -> string
     try:
         n = int(gz_in)
+        if modulo:
+            n = (n - 1) % 60 + 1
     except (TypeError, ValueError):
         raise ValueError(f"Invalid ganzhi string: {gz_in}")
         return None
