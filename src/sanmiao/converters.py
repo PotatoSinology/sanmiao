@@ -28,7 +28,14 @@ _GANZHI_PINYIN_TO_NUM = {
     'jiachen': 41, 'yisi': 42, 'bingwu': 43, 'dingwei': 44, 'wushen': 45, 'jiyou': 46, 'gengxu': 47, 'xinhai': 48, 'renzi': 49, 'guichou': 50,
     'jiayin': 51, 'yimao': 52, 'bingchen': 53, 'dingsi': 54, 'wuwu': 55, 'jiwei': 56, 'gengshen': 57, 'xinyou': 58, 'renxu': 59, 'guihai': 60,
 }
-_NUM_TO_GANZHI_PINYIN = {v: k for k, v in _GANZHI_PINYIN_TO_NUM.items()}
+_NUM_TO_GANZHI_PINYIN = {
+    1: 'jiazi₀₁', 2: 'yichou₀₂', 3: 'bingyin₀₃', 4: 'dingmao₀₄', 5: 'wuchen₀₅', 6: 'jisi₀₆', 7: 'gengwu₀₇', 8: 'xinwei₀₈', 9: 'renshen₀₉', 10: 'guiyou₁₀',
+    11: 'jiaxu₁₁', 12: 'yihai₁₂', 13: 'bingzi₁₃', 14: 'dingchou₁₄', 15: 'wuyin₁₅', 16: 'jimao₁₆', 17: 'gengchen₁₇', 18: 'xinsi₁₈', 19: 'renwu₁₉', 20: 'guiwei₂₀',
+    21: 'jiashen₂₁', 22: 'yiyou₂₂', 23: 'bingxu₂₃', 24: 'dinghai₂₄', 25: 'wuzi₂₅', 26: 'jichou₂₆', 27: 'gengyin₂₇', 28: 'xinmao₂₈', 29: 'renchen₂₉', 30: 'guisi₃₀',
+    31: 'jiawu₃₁', 32: 'yiwei₃₂', 33: 'bingshen₃₃', 34: 'dingyou₃₄', 35: 'wuxu₃₅', 36: 'jihai₃₆', 37: 'gengzi₃₇', 38: 'xinchou₃₈', 39: 'renyin₃₉', 40: 'guimao₄₀',
+    41: 'jiachen₄₁', 42: 'yisi₄₂', 43: 'bingwu₄₃', 44: 'dingwei₄₄', 45: 'wushen₄₅', 46: 'jiyou₄₆', 47: 'gengxu₄₇', 48: 'xinhai₄₈', 49: 'renzi₄₉', 50: 'guichou₅₀',
+    51: 'jiayin₅₁', 52: 'yimao₅₂', 53: 'bingchen₅₃', 54: 'dingsi₅₄', 55: 'wuwu₅₅', 56: 'jiwei₅₆', 57: 'gengshen₅₇', 58: 'xinyou₅₈', 59: 'renxu₅₉', 60: 'guihai₆₀',
+}
 
 
 def gz_year(num: int) -> int:
@@ -78,6 +85,8 @@ def ganshu(gz_in, en=False, modulo=False):
             return to_num.get(s, None)
         else:
             s = s.lower()
+            # Strip Unicode subscript digits so "jiazi₀₁" and "jiazi" both look up
+            s = re.sub(r'[\u2080-\u2089]+', '', s)
         out = to_num.get(s, None)
         if out is None:
             raise ValueError(f"Invalid ganzhi string: {gz_in}")

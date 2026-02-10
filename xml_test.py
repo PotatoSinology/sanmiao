@@ -15,11 +15,6 @@ ui = """
 </root>
 """
 
-ui = """
-<root>
-<date index="3"><dyn>梁</dyn><era>太清</era><suffix>時</suffix></date>九道尺素隱訣
-</root>
-"""
 def my_post_normalize(df):
     df = backwards_fill_days(df)
     df = filter_annals(df)
