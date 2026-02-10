@@ -37,3 +37,6 @@ sql_norbert.py
 
 # Cursor
 *.code-workspace
+
+# Notes
+IMPLEMENTATION_PLAN.md
