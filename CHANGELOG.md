@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynasty-mismatch era compatibility:** Before ejecting a dynasty, we check whether the era belongs to a dynasty whose tag (or whose parent’s tag via `part_of`) exactly equals `dyn_str`. Uses `filter_dynasty_mismatch_era_compatible` with `era_df`, `dyn_tag_df`, and `dyn_df` (for `part_of`). Avoids falsely ejecting 漢永平 (永平 under 東漢 46, 46 part_of 42, tag 漢 = 42) and 魏永平 (永平 under 北魏 89, tag 魏 = 89); compatibility is exact tag match only.
 - **Dynasty + suffix only:** In `bulk_resolve_dynasty_ids`, we no longer expand to child dynasties (part_of) when the date has only dynasty + suffix (no era_str, no ruler_str). So 晉時 resolves to 晉 (51) only, not 西晉/東晉 (52, 53). Expansion to children still happens when the date has era or ruler context.
 
+## [0.2.5] - 2025-02-11
+
+- Fixed duplicate fief and dynasty names on Korean kings.
+- Silla kings now reappear
+- Removed regnal year from several Silla kings where era present.
+
 ## [0.2.4] - 2025-02-10
 - Additional debugging of date resolution for XML tagging purposes
 
@@ -94,7 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.1...v0.2.2
