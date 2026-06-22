@@ -100,6 +100,8 @@ For bulk/XML pipelines with `fuzzy=True`, pass `original_text` and `normalized_t
 
 Sanmiao uses historical tables based on those of Zhang Peiyu[^1] and Uchida Masao,[^2] and it is updated to include new archaeological evidence[^3] as well as minor dynasties and reign eras. The tables are based on calculation from contemporary procedure texts (_lifa_ 曆法), eclipses, and recorded dates. I have supplemented these for the moment with tables from the [Buddhist Studies Time Authority Databases](https://authority.dila.edu.tw/time/) for the Sun-Wu, Liu-Shu, Liao, Jin, and Korea.
 
+The character conversion table used for 'fuzzy matching' was compiled with the help of M. Pandolfino ([mpandolfino](https://github.com/mpandolfino) as part of [marinaMoji](https://github.com/marinaMoji/marinaMoji).
+
 In future versions, I plan to:
 
 - improve tables and functionalities

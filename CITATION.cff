@@ -3,7 +3,12 @@ message: "If you use this software, please cite it as below."
 authors:
 - family-names: Morgan
   given-names: Daniel Patrick
-orcid: https://orcid.org/0000-0001-9115-3931
+  orcid: https://orcid.org/0000-0001-9115-3931
+contributors:
+- family-names: Pandolfino
+  given-names: Marina
+  roles:
+  - "Compilation of conversion tables"
 title: PotatoSinology/sanmiao
 version: v0.2.6
 date-released: 2026-06-22
