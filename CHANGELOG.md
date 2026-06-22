@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-06-22
+
+### Fixed
+- Include `sanmiao_fuzzy_chars.csv` in the repository and PyPI wheel (file was gitignored and missing from the 0.2.6 release, breaking fuzzy matching on install).
+- Restrict `.gitignore` CSV/TSV rules to the repository root (`/*.csv`, `/*.tsv`) so packaged data under `src/sanmiao/data/` is tracked normally.
+
 ## [0.2.6] - 2026-06-22
 
 ### Added
@@ -112,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.3...v0.2.4
