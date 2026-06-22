@@ -34,3 +34,5 @@ if output_df.empty:
     print("Columns:", list(output_df.columns))
 else:
     print(output_df[cols_present] if cols_present else output_df)
+
+print(xml_string)

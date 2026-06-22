@@ -27,6 +27,8 @@ Thumbs.db
 # SQL scripts (private)
 sql_date_table_download.py
 sql_norbert.py
+*.csv
+*.tsv
 
 # Debug logs
 .cursor/debug.log

@@ -7,16 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-22
+
 ### Added
+- **Fuzzy matching (cross-script input).** `cjk_date_interpreter(fuzzy=True)` normalises user input via `sanmiao_fuzzy_chars.csv` and matches dynasty, era, and ruler names using simplified columns (`string_simp`, `era_name_simp`) in the tag tables. Enables traditional Chinese, simplified Chinese, and Japanese character forms in conversion reports. `tag_date_elements()`, `bulk_resolve_*`, `filter_dynasty_mismatch_era_compatible`, and `extract_date_table_bulk()` accept a `fuzzy` flag; XML-oriented callers default to `fuzzy=False`.
+- **`restore_original_date_strings()`** — maps per-date report headers back to the user’s original script when normalization preserves string length (including multiple dates on one line).
+- **`load_normalisation_map()` / `normalise_for_search()`** in `loaders.py`.
+- Simplified tag columns in `dynasty_tags.csv`, `ruler_tags.csv`, and `era_table.csv` (built from the fuzzy character map at data-prep time).
+- Optional dependency group `sanmiao[fuzzy]` (`opencc-python-reimplemented`) reserved for future runtime OpenCC use.
+- **PyPI Sigstore attestations (PEP 740).** The publish workflow separates build and publish jobs and uploads Sigstore-signed digital attestations with each release. See the README “Supply chain security” section.
 - **Dynasty-mismatch validation and XML correction.** When dynasty-restricted resolution finds no valid era_id or ruler_id for a date (e.g. false pair 清+太上), the pipeline now:
   - Detects such date_indices (`detect_dynasty_mismatch_indices`) and fixes the XML via `fix_dynasty_mismatch_xml`: moves `<dyn>` content out of the `<date>` element, then runs `remove_lone_tags` so dates left with only era/ruler are stripped.
   - Drops from the extracted table only date_indices that were actually removed from the XML (`date_indices_in_xml_string`); for dates that remain (e.g. era+year), clears `dyn_id` and re-resolves era/ruler without dynasty restriction so they are solved (e.g. 太康二年 → Jin and Liao candidates).
 - New helper `date_indices_in_xml_string()` in `xml_utils` to report which date indices still exist in an XML string after correction.
 
 ### Changed
-- Era and ruler resolution already restricted by dynasty (`bulk_resolve_era_ids` by `dyn_id`, `bulk_resolve_ruler_ids` by `ruler_df`); pipeline now applies dynasty-mismatch detection and XML/table correction after resolution so bad dynasty+era/ruler pairs are fixed and remaining dates are solved.
-- **Dynasty-mismatch era compatibility:** Before ejecting a dynasty, we check whether the era belongs to a dynasty whose tag (or whose parent’s tag via `part_of`) exactly equals `dyn_str`. Uses `filter_dynasty_mismatch_era_compatible` with `era_df`, `dyn_tag_df`, and `dyn_df` (for `part_of`). Avoids falsely ejecting 漢永平 (永平 under 東漢 46, 46 part_of 42, tag 漢 = 42) and 魏永平 (永平 under 北魏 89, tag 魏 = 89); compatibility is exact tag match only.
-- **Dynasty + suffix only:** In `bulk_resolve_dynasty_ids`, we no longer expand to child dynasties (part_of) when the date has only dynasty + suffix (no era_str, no ruler_str). So 晉時 resolves to 晉 (51) only, not 西晉/東晉 (52, 53). Expansion to children still happens when the date has era or ruler context.
+- Era and ruler resolution restricted by dynasty (`bulk_resolve_era_ids` by `dyn_id`, `bulk_resolve_ruler_ids` by `ruler_df`); pipeline applies dynasty-mismatch detection and XML/table correction after resolution so bad dynasty+era/ruler pairs are fixed and remaining dates are solved.
+- **Dynasty-mismatch era compatibility:** Before ejecting a dynasty, check whether the era belongs to a dynasty whose tag (or whose parent’s tag via `part_of`) exactly equals `dyn_str`. Uses `filter_dynasty_mismatch_era_compatible` with `era_df`, `dyn_tag_df`, and `dyn_df` (for `part_of`). Supports `fuzzy` mode via `*_simp` columns.
+- **Dynasty + suffix only:** In `bulk_resolve_dynasty_ids`, no longer expand to child dynasties (`part_of`) when the date has only dynasty + suffix (no era_str, no ruler_str). So 晉時 resolves to 晉 (51) only, not 西晉/東晉 (52, 53). Expansion to children still happens when the date has era or ruler context.
+
+### Fixed
+- **Era tagged but unresolved:** When `era_str` is present but does not match a dynasty/ruler pair, skip the ruler-only candidate fallback (fixes spurious matches such as 西魏文帝 for 魏文帝黃初).
+- **Sequential `cal_stream` inheritance:** When `era_id` is inherited from implied state but `cal_stream_ls` is empty (e.g. after an ambiguous prior date), look up `cal_stream` from `era_df` so lunar solving no longer raises `KeyError: 'cal_stream'` on annals-style text (e.g. 明年五月 after 魏文帝黃初).
 
 ## [0.2.5] - 2025-02-11
 
@@ -100,7 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.2...v0.2.3
@@ -112,4 +125,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.6]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/PotatoSinology/sanmiao/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/PotatoSinology/sanmiao/releases/tag/v0.1.4
-

@@ -170,7 +170,7 @@ def detect_dynasty_mismatch_indices(df):
     return set(df.loc[mismatch, 'date_index'].dropna().unique().tolist())
 
 
-def filter_dynasty_mismatch_era_compatible(mismatch_indices, df, era_df, dyn_tag_df, dyn_df=None):
+def filter_dynasty_mismatch_era_compatible(mismatch_indices, df, era_df, dyn_tag_df, dyn_df=None, fuzzy=False):
     """
     Remove from mismatch_indices any date_index where the era_str matches an era
     whose dynasty (or the dynasty it belongs to via part_of) has a tag that
@@ -182,16 +182,21 @@ def filter_dynasty_mismatch_era_compatible(mismatch_indices, df, era_df, dyn_tag
     :param era_df: DataFrame with era_name, dyn_id
     :param dyn_tag_df: DataFrame with string (tag), dyn_id
     :param dyn_df: Optional DataFrame with dyn_id, part_of (dynasty it belongs to)
+    :param fuzzy: bool, if True, compare era_str and dyn_str against simplified columns
+        (era_name_simp, string_simp); if False, use traditional forms
     :return: subset of mismatch_indices to treat as true mismatch
     """
+    era_tag_column = 'era_name_simp' if fuzzy else 'era_name'
+    tag_column = 'string_simp' if fuzzy else 'string'
+
     if not mismatch_indices or 'era_str' not in df.columns or 'dyn_str' not in df.columns:
         return mismatch_indices
-    if 'era_name' not in era_df.columns or 'dyn_id' not in era_df.columns:
+    if era_tag_column not in era_df.columns or 'dyn_id' not in era_df.columns:
         return mismatch_indices
-    if 'string' not in dyn_tag_df.columns or 'dyn_id' not in dyn_tag_df.columns:
+    if tag_column not in dyn_tag_df.columns or 'dyn_id' not in dyn_tag_df.columns:
         return mismatch_indices
-    needed = era_df[['era_name', 'dyn_id']].drop_duplicates()
-    tags_by_dyn = dyn_tag_df[['string', 'dyn_id']].drop_duplicates()
+    needed = era_df[[era_tag_column, 'dyn_id']].drop_duplicates()
+    tags_by_dyn = dyn_tag_df[[tag_column, 'dyn_id']].drop_duplicates()
     # Build dyn_id -> part_of (parent dynasty) from dyn_df
     part_of_map = {}
     if dyn_df is not None and 'dyn_id' in dyn_df.columns and 'part_of' in dyn_df.columns:
@@ -218,7 +223,7 @@ def filter_dynasty_mismatch_era_compatible(mismatch_indices, df, era_df, dyn_tag
         if not dyn_str or not era_str:
             out.add(date_idx)
             continue
-        eras = needed[needed['era_name'] == era_str]
+        eras = needed[needed[era_tag_column] == era_str]
         if eras.empty:
             out.add(date_idx)
             continue
@@ -238,7 +243,7 @@ def filter_dynasty_mismatch_era_compatible(mismatch_indices, df, era_df, dyn_tag
             out.add(date_idx)
             continue
         # Compatible only if some tag exactly equals dyn_str
-        if (tags['string'].astype(str).str.strip() == dyn_str).any():
+        if (tags[tag_column].astype(str).str.strip() == dyn_str).any():
             continue
         out.add(date_idx)
     return out
@@ -464,6 +469,7 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
             return None
         if s == "正月": return 1
         if s == "臘月": return 13
+        if s == "腊月": return 13
         if s == "一月": return 14
         # Strip 月 character before converting numerals
         return numcon(s.rstrip('月'))
@@ -561,7 +567,7 @@ def normalise_date_fields(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df):
+def bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df, fuzzy=False):
     """
     Bulk resolve dynasty string identifiers to dynasty IDs.
     
@@ -578,6 +584,9 @@ def bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df):
     """
     out = df.copy()
     
+    # Fuzzy matching
+    tag_column = 'string_simp' if fuzzy else 'string'
+
     # If no dynasty strings, return as-is
     if 'dyn_str' not in out.columns or out['dyn_str'].notna().sum() == 0:
         return out
@@ -585,16 +594,16 @@ def bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df):
     # Step 1: Merge with dyn_tag_df to get initial dynasty IDs
     # Use left merge to preserve all rows, even those without matches
     dyn_merge = out[['date_index', 'dyn_str']].dropna(subset=['dyn_str']).merge(
-        dyn_tag_df[['string', 'dyn_id']],
+        dyn_tag_df[[tag_column, 'dyn_id']],
         how='left',
         left_on='dyn_str',
-        right_on='string',
+        right_on=tag_column,
         suffixes=('', '_tag')
     )
     
     # Drop the temporary 'string' column from merge
-    if 'string' in dyn_merge.columns:
-        dyn_merge = dyn_merge.drop(columns=['string'])
+    if tag_column in dyn_merge.columns:
+        dyn_merge = dyn_merge.drop(columns=[tag_column])
     
     # Date indices that have era or ruler context: only then expand to child dynasties (part_of).
     # For dynasty + suffix only (e.g. 晉時), keep only the directly matched dynasty (晉), not 西晉/東晉.
@@ -678,7 +687,7 @@ def bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df):
     return out
 
 
-def bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df=None):
+def bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df=None, fuzzy=False):
     """
     Bulk resolve ruler string identifiers to ruler (person) IDs.
     When dynasty (dyn_id) is present and ruler_df is provided, only accept
@@ -691,6 +700,9 @@ def bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df=None):
     """
     out = df.copy()
 
+    # Fuzzy matching
+    tag_column = 'string_simp' if fuzzy else 'string'
+
     # If no ruler strings, return as-is
     if 'ruler_str' not in out.columns or out['ruler_str'].notna().sum() == 0:
         return out
@@ -699,14 +711,14 @@ def bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df=None):
     if 'dyn_id' in out.columns:
         cols_for_merge.append('dyn_id')
     rows_for_ruler = out[cols_for_merge].dropna(subset=['ruler_str']).merge(
-        ruler_tag_df[['string', 'person_id']],
+        ruler_tag_df[[tag_column, 'person_id']],
         how='left',
         left_on='ruler_str',
-        right_on='string',
+        right_on=tag_column,
         suffixes=('', '_tag')
     )
-    if 'string' in rows_for_ruler.columns:
-        rows_for_ruler = rows_for_ruler.drop(columns=['string'])
+    if tag_column in rows_for_ruler.columns:
+        rows_for_ruler = rows_for_ruler.drop(columns=[tag_column])
     rows_for_ruler = rows_for_ruler.rename(columns={'person_id': 'ruler_id'})
 
     # When dyn_id is present and ruler_df given, keep only (ruler_id, dyn_id) in ruler_df
@@ -735,7 +747,7 @@ def bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df=None):
     return out
 
 
-def bulk_resolve_era_ids(df, era_df):
+def bulk_resolve_era_ids(df, era_df, fuzzy=False):
     """
     Bulk resolve era string identifiers to era IDs.
     
@@ -750,6 +762,9 @@ def bulk_resolve_era_ids(df, era_df):
     :return: DataFrame with additional era-related columns, expanded for multiple matches
     """
     out = df.copy()
+
+    # Fuzzy matching
+    tag_column = 'era_name_simp' if fuzzy else 'era_name'
 
     # -------------------------------------------------------------------------
     # Suffix-aware era resolution
@@ -789,7 +804,7 @@ def bulk_resolve_era_ids(df, era_df):
             nonlocal out
             if era_choices.empty:
                 return
-            era_cols = ['era_id', 'era_name', 'dyn_id', 'cal_stream', 'era_start_year', 'era_end_year']
+            era_cols = ['era_id', tag_column, 'dyn_id', 'cal_stream', 'era_start_year', 'era_end_year']
             if 'max_year' in era_choices.columns:
                 era_cols.append('max_year')
             # Merge on date_index and ruler_id if both are available to prevent cartesian product
@@ -806,7 +821,7 @@ def bulk_resolve_era_ids(df, era_df):
             )
             # Fill era_str from chosen era_name where missing
             if 'era_str' in out.columns:
-                out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_str'] = out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_name']
+                out.loc[out[tag_column].notna() & out['era_str'].isna(), 'era_str'] = out.loc[out[tag_column].notna() & out['era_str'].isna(), tag_column]
             out = prioritize_resolved_values(out)
 
         # Choose EARLIEST era for ruler when suffix indicates start-period (即位, 初, etc.).
@@ -818,7 +833,7 @@ def bulk_resolve_era_ids(df, era_df):
                 suf.isin(list(early_ruler_suffix))
             )
             if mask_need_early.any():
-                era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', 'era_name', 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
+                era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', tag_column, 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
                 if 'max_year' in era_df.columns:
                     era_cols_needed.append('max_year')
                 era_cols_needed = [c for c in era_cols_needed if c in era_df.columns]
@@ -872,7 +887,7 @@ def bulk_resolve_era_ids(df, era_df):
                 suf.isin(list(late_ruler_suffix))
             )
             if mask_need_last.any():
-                era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', 'era_name', 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
+                era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', tag_column, 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
                 if 'max_year' in era_df.columns:
                     era_cols_needed.append('max_year')
                 era_cols_needed = [c for c in era_cols_needed if c in era_df.columns]
@@ -935,7 +950,7 @@ def bulk_resolve_era_ids(df, era_df):
                 rows_need = rows_need[rows_need['ruler_id'].isin(single_rulers)]
 
                 if not rows_need.empty:
-                    era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', 'era_name', 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
+                    era_cols_needed = ['ruler_id', 'dyn_id', 'era_id', tag_column, 'cal_stream', 'era_start_year', 'era_end_year', 'era_start_jdn']
                     if 'max_year' in era_df.columns:
                         era_cols_needed.append('max_year')
                     era_cols_needed = [c for c in era_cols_needed if c in era_df.columns]
@@ -959,7 +974,7 @@ def bulk_resolve_era_ids(df, era_df):
         if mask_no_era.any():
             # Get earliest era per ruler (using JDN start date for accurate ordering)
             # Sort by era_start_jdn to get truly earliest era, drop duplicates on ruler_id
-            era_cols_needed = ['ruler_id', 'era_id', 'era_name', 'dyn_id', 'cal_stream', 
+            era_cols_needed = ['ruler_id', 'era_id', tag_column, 'dyn_id', 'cal_stream', 
                                'era_start_year', 'era_end_year']
             if 'max_year' in era_df.columns:
                 era_cols_needed.append('max_year')
@@ -1027,7 +1042,7 @@ def bulk_resolve_era_ids(df, era_df):
             
             if not era_merge.empty:
                 # Merge era info back to out
-                era_cols = ['era_id', 'era_name', 'dyn_id', 'cal_stream',
+                era_cols = ['era_id', tag_column, 'dyn_id', 'cal_stream',
                            'era_start_year', 'era_end_year']
                 if 'max_year' in era_merge.columns:
                     era_cols.append('max_year')
@@ -1038,7 +1053,7 @@ def bulk_resolve_era_ids(df, era_df):
                     suffixes=('', '_resolved')
                 )
                 # Set era_str from era_name for rows that got matched
-                out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_str'] = out.loc[out['era_name'].notna() & out['era_str'].isna(), 'era_name']
+                out.loc[out[tag_column].notna() & out['era_str'].isna(), 'era_str'] = out.loc[out[tag_column].notna() & out['era_str'].isna(), tag_column]
                 # Prioritize resolved values
                 out = prioritize_resolved_values(out)
     
@@ -1048,7 +1063,7 @@ def bulk_resolve_era_ids(df, era_df):
         return out
     
     # Create minimal era mapping with all needed columns
-    era_cols = ['era_name', 'era_id', 'ruler_id', 'dyn_id', 'cal_stream', 
+    era_cols = [tag_column, 'era_id', 'ruler_id', 'dyn_id', 'cal_stream', 
                 'era_start_year', 'era_end_year']
     if 'max_year' in era_df.columns:
         era_cols.append('max_year')
@@ -1084,11 +1099,11 @@ def bulk_resolve_era_ids(df, era_df):
                 era_map,
                 how='left',
                 left_on=['era_str', 'dyn_id'],
-                right_on=['era_name', 'dyn_id'],
+                right_on=[tag_column, 'dyn_id'],
                 suffixes=('', '_era')
             )
-            if 'era_name' in part.columns:
-                part = part.drop(columns=['era_name'])
+            if tag_column in part.columns:
+                part = part.drop(columns=[tag_column])
             era_parts.append(part)
         if (~with_dyn).any():
             rows_without_dyn = rows_for_era[~with_dyn].copy()
@@ -1096,11 +1111,11 @@ def bulk_resolve_era_ids(df, era_df):
                 era_map,
                 how='left',
                 left_on='era_str',
-                right_on='era_name',
+                right_on=tag_column,
                 suffixes=('', '_era')
             )
-            if 'era_name' in part.columns:
-                part = part.drop(columns=['era_name'])
+            if tag_column in part.columns:
+                part = part.drop(columns=[tag_column])
             era_parts.append(part)
         if era_parts:
             era_merge = pd.concat(era_parts, ignore_index=True).drop_duplicates(subset=['date_index', 'era_id'])
@@ -1427,6 +1442,9 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             if (combo['dyn_id'] is not None and
                 combo['ruler_id'] is None and
                 combo['era_id'] is None):
+                era_str = combo['source_row'].get('era_str')
+                if era_str is not None and str(era_str).strip():
+                    continue
                 # Find dynasty info - pandas handles int/float comparison automatically
                 # But ensure we're comparing like types by converting both sides
                 dyn_id_val = combo['dyn_id']
@@ -1469,6 +1487,10 @@ def bulk_generate_date_candidates(df_with_ids, dyn_df, ruler_df, era_df, master_
             # Special case: ruler specified but no era - use ruler's reign period
             if (combo['ruler_id'] is not None and
                 combo['era_id'] is None):
+                # Era was tagged but did not resolve for this dyn/ruler pair — drop it
+                era_str = combo['source_row'].get('era_str')
+                if era_str is not None and str(era_str).strip():
+                    continue
                 # Find ruler info - convert to same type for comparison
                 ruler_id_val = int(combo['ruler_id']) if pd.notna(combo['ruler_id']) else None
                 if ruler_id_val is not None:
@@ -1693,9 +1715,57 @@ def add_can_names_bulk(table, ruler_can_names, dyn_df, era_df=None):
     return out
 
 
+def restore_original_date_strings(df, original_text, normalized_text):
+    """
+    Map per-date normalized date_string values back to the user's original script.
+
+    Tagging and resolution run on normalized text, so date_string in the dataframe
+    reflects simplified forms. When normalization is character-wise and preserves
+    string length, each per-date date_string occupies the same span in both the
+    full normalized line and the original line. This function copies those spans
+    from original_text into date_string for each date_index (in order).
+
+    :param df: DataFrame with date_index and date_string columns
+    :param original_text: str, user-typed text before normalization
+    :param normalized_text: str, full line after normalization (what was tagged)
+    :return: DataFrame with date_string restored where spans align
+    """
+    if df is None or df.empty or 'date_string' not in df.columns or 'date_index' not in df.columns:
+        return df
+    if not original_text or not normalized_text:
+        return df
+
+    original_text = str(original_text).replace(' ', '')
+    normalized_text = str(normalized_text).replace(' ', '')
+    if original_text == normalized_text:
+        return df
+    if len(original_text) != len(normalized_text):
+        return df
+
+    out = df.copy()
+    cursor = 0
+    for date_idx in sorted(out['date_index'].dropna().unique(), key=lambda x: float(x)):
+        mask = out['date_index'] == date_idx
+        norm_ds = out.loc[mask, 'date_string'].dropna()
+        if norm_ds.empty:
+            continue
+        norm_ds = str(norm_ds.iloc[0]).replace(' ', '').strip()
+        if not norm_ds:
+            continue
+        pos = normalized_text.find(norm_ds, cursor)
+        if pos == -1:
+            continue
+        end = pos + len(norm_ds)
+        out.loc[mask, 'date_string'] = original_text[pos:end]
+        cursor = end
+
+    return out
+
+
 def extract_date_table_bulk(
     xml_root, implied=None, pg=False, gs=None, lang='en', tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, tables=None, 
-    sequential=True, proliferate=False, attributes=False, post_normalisation_func=None):
+    sequential=True, proliferate=False, attributes=False, post_normalisation_func=None, fuzzy=False,
+    original_text=None, normalized_text=None):
     """
     Optimized bulk version of extract_date_table using pandas operations.
     
@@ -1717,6 +1787,9 @@ def extract_date_table_bulk(
     :param sequential: bool, intelligently forward fills missing date elements from previous Sinitic date string
     :param proliferate: bool, finds all candidates for date strings without dynasty, ruler, or era
     :param attributes: bool, if True, extract attributes from <date> elements when df is None
+    :param original_text: Optional str, user-typed text before normalization. With normalized_text,
+        restores per-date date_string spans to the original script for report headers.
+    :param normalized_text: Optional str, full line after normalization (the text that was tagged)
     :return: tuple (xml_string, output_df, implied, xml_modified) - xml_modified is True when dynasty-mismatch fix was applied
     """
     # Defaults
@@ -1775,9 +1848,9 @@ def extract_date_table_bulk(
         master_table = era_df[['cal_stream', 'dyn_id', 'ruler_id', 'era_id', 'era_start_year', 'era_end_year', 'era_start_jdn', 'era_end_jdn']].copy()
         
         # Step 5: Bulk resolve IDs (Phase 1)
-        df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df)
-        df = bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df)
-        df = bulk_resolve_era_ids(df, era_df)
+        df = bulk_resolve_dynasty_ids(df, dyn_tag_df, dyn_df, fuzzy=fuzzy)
+        df = bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df, fuzzy=fuzzy)
+        df = bulk_resolve_era_ids(df, era_df, fuzzy=fuzzy)
         # Save copy after ID resolution but before post_normalisation_func
         df_after_resolution = df.copy()
         
@@ -1786,7 +1859,7 @@ def extract_date_table_bulk(
         # that exactly equals dyn_str (e.g. 永平 under dyn_id 89, tag 魏). Then fix XML.
         mismatch_indices = detect_dynasty_mismatch_indices(df_after_resolution)
         mismatch_indices = filter_dynasty_mismatch_era_compatible(
-            mismatch_indices, df_after_resolution, era_df, dyn_tag_df, dyn_df
+            mismatch_indices, df_after_resolution, era_df, dyn_tag_df, dyn_df, fuzzy=fuzzy
         )
         if mismatch_indices:
             modified_xml_string = fix_dynasty_mismatch_xml(
@@ -1804,8 +1877,8 @@ def extract_date_table_bulk(
                 # Clear dynasty so era/ruler can be resolved without dynasty restriction
                 mask_kept = df['date_index'].isin(kept_mismatch)
                 df.loc[mask_kept, 'dyn_id'] = np.nan
-                df = bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df)
-                df = bulk_resolve_era_ids(df, era_df)
+                df = bulk_resolve_ruler_ids(df, ruler_tag_df, ruler_df, fuzzy=fuzzy)
+                df = bulk_resolve_era_ids(df, era_df, fuzzy=fuzzy)
                 df_after_resolution = df.copy()
         
         # Step 3: Post-normalisation function
@@ -2023,7 +2096,10 @@ def extract_date_table_bulk(
                         if (implied.get('era_id_ls') and len(implied['era_id_ls']) == 1 and ('era_id' not in g.columns or g['era_id'].isna().all())):
                             g['era_id'] = implied['era_id_ls'][0]
                             bloc = era_df[era_df['era_id'] == g['era_id'].values[0]]
-                            g['era_start_year'] = bloc['era_start_year'].values[0]
+                            if not bloc.empty:
+                                g['era_start_year'] = bloc['era_start_year'].values[0]
+                                if 'cal_stream' in bloc.columns and ('cal_stream' not in g.columns or g['cal_stream'].isna().all()):
+                                    g['cal_stream'] = bloc['cal_stream'].values[0]
                         if (not suppress_inherited_year) and implied.get('year') is not None and ('year' not in g.columns or g['year'].isna().all()):
                             g['year'] = implied['year']
                         if (not suppress_inherited_year) and implied.get('sex_year') is not None and ('sex_year' not in g.columns or g['sex_year'].isna().all()):
@@ -2039,6 +2115,14 @@ def extract_date_table_bulk(
                         if implied.get('intercalary') is not None and ('intercalary' not in g.columns or g['intercalary'].isna().all()):
                             g['intercalary'] = implied['intercalary']
                         has_month = True
+                # If era_id is known but cal_stream is missing (e.g. cal_stream_ls empty after
+                # ambiguous prior date), look up cal_stream from era_df.
+                if ('era_id' in g.columns and g['era_id'].notna().any() and
+                        ('cal_stream' not in g.columns or g['cal_stream'].isna().all())):
+                    era_id_val = g['era_id'].dropna().iloc[0]
+                    bloc = era_df[era_df['era_id'] == era_id_val]
+                    if not bloc.empty and 'cal_stream' in bloc.columns:
+                        g['cal_stream'] = bloc['cal_stream'].values[0]
             # -----------------------------------------------------------------
             # Sequential relative-year handling (year/歲 only)
             #
@@ -2390,6 +2474,9 @@ def extract_date_table_bulk(
                     output_df = output_df.drop_duplicates().reset_index(drop=True)
         else:
             output_df = pd.DataFrame()
+
+    if original_text is not None and normalized_text is not None and not output_df.empty:
+        output_df = restore_original_date_strings(output_df, original_text, normalized_text)
 
     # Return XML string (use dynasty-mismatch fixed version when applied), output dataframe, implied, and whether XML was modified
     xml_string = (

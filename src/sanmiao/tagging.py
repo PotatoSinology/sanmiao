@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 import lxml.etree as et
 from .loaders import (
     load_csv, load_tag_tables
@@ -16,19 +17,19 @@ SKIP_ALL = {"date","year","month","day","gz","sexYear","era","ruler","dyn","suff
 
 SKIP_TEXT_ONLY = {"pb", "meta"}
 
-YEAR_RE   = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九十]+|十有[一二三四五六七八九]|元)[年載])")
+YEAR_RE   = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九十]+|十有[一二三四五六七八九]|元)[年载載])")
 # "廿<date><year>" fix disappears because we won't create that broken boundary in text mode.
 
 # Months: order matters (more specific first)
-LEAPMONTH_RE1 = re.compile(r"閏月")
-LEAPMONTH_RE2 = re.compile(r"閏((?:十[一二]|十有[一二]|正)月)")
-LEAPMONTH_RE3 = re.compile(r"閏((?:[一二三四五六七八九十]|正|臘)月)")
+LEAPMONTH_RE1 = re.compile(r"([閏闰])月")
+LEAPMONTH_RE2 = re.compile(r"([閏闰])((?:十[一二]|十有[一二]|正)月)")
+LEAPMONTH_RE3 = re.compile(r"([閏闰])((?:[一二三四五六七八九十]|正|臘|腊)月)")
 MONTH_RE1     = re.compile(r"((?:十有[一二]|十[一二]|正)月)")
-MONTH_RE2     = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九十]|正|臘)月)")
+MONTH_RE2     = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九十]|正|臘|腊)月)")
 
 DAY_RE    = re.compile(r"((?<![一二三四五六七八九])(?:[一二三四五六七八九]|[一二]*十[一二三四五六七八九]*|[廿卄][一二三四五六七八九]*|卅|丗|三十)日)")
 GZ_RE     = re.compile(r"([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
-SEXYEAR_RE = re.compile(r"(([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]))(年|歲)")
+SEXYEAR_RE = re.compile(r"(([甲乙丙景丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]))(年|歲|岁)")
 SEASON_RE = re.compile(r"([春秋冬夏])")
 
 LP_RE = re.compile(r"([朔晦])")
@@ -38,19 +39,19 @@ GY_RE = re.compile(r"(改元)")
 #
 # User rules (2026-01):
 # - Only "其" and "先是" may be tagged with unit="" (handled structurally later, not by regex).
-# - All other rel markers require an explicit unit (年/歲/月); without a unit they MUST NOT be tagged.
+# - All other rel markers require an explicit unit (年/歲/岁/月); without a unit they MUST NOT be tagged.
 # - "是歲，" / "今年，" / "今月，" may precede anything; whether it is *attached into* the following date is decided later.
 # - "明月" means "bright moon", not "next month", so we exclude "明" when followed by just "月".
 #
 # Groups:
 #   1 = dir char (後/次/來/明/昨/前/去/其/是/今)
-#   2 = unit (年/歲/月), must be present in this regex
+#   2 = unit (年/歲/岁/月), must be present in this regex
 #   3 = trailing Chinese comma(s) immediately following the unit (optional)
-# Note: Two patterns - one for "明" (must start with 年 or 歲), one for others
-REL_RE_MING = re.compile(r"(明)([年歲][月]?)(，*)")  # "明" must be followed by 年 or 歲 (optionally 月 after)
-REL_RE_OTHER = re.compile(r"([後次來昨前去其是今])([年歲月]+)(，*)")  # Other direction chars with any unit
+# Note: Two patterns - one for "明" (must start with 年 or 歲/岁), one for others
+REL_RE_MING = re.compile(r"(明)([年歲岁][月]?)(，*)")  # "明" must be followed by 年 or 歲/岁 (optionally 月 after)
+REL_RE_OTHER = re.compile(r"([後次來昨前去其是今])([年歲岁月]+)(，*)")  # Other direction chars with any unit
 REL_RE_XIANSHI = re.compile(r"(先是)(，*)")  # "先是" (previously/before this) - special compound pattern
-SEX_YEAR_PREFIX_RE = re.compile(r"(歲[次在])\s*$")
+SEX_YEAR_PREFIX_RE = re.compile(r"([歲岁][次在])\s*$")
 PUNCT_RE = re.compile(r"^[，,、\s]*")
 
 ERA_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世)")
@@ -173,36 +174,39 @@ def make_sexyear(m):
     sy = et.SubElement(d, "sexYear")
     sy.text = m.group(1)  # sexagenary part (甲子 etc.)
     filler = et.SubElement(sy, "filler")
-    filler.text = m.group(3)  # suffix (年 or 歲)
+    filler.text = m.group(3)  # suffix (年, 歲, or 岁)
     return d
 
 
-def make_leap_month_exact_monthtext(month_text: str):
+def make_leap_month_exact_monthtext(month_text: str, int_text: str):
     """
     Create XML element for leap month with specific month text.
 
     :param month_text: str, text for the month element
+    :param int_text: str, intercalary marker as matched in input (閏 or 闰)
     :return: et.Element, XML date element for leap month
     """
     d = et.Element("date")
-    i = et.SubElement(d, "int"); i.text = "閏"
-    m = et.SubElement(d, "month"); m.text = month_text
+    i = et.SubElement(d, "int")
+    i.text = int_text
+    m = et.SubElement(d, "month")
+    m.text = month_text
     return d
 
 
 def make_leapmonth_from_group1(m):
     """
-    Create leap month element from regex match group 1.
+    Create leap month element from regex match (intercalary char + month text).
 
     :param m: regex match object
     :return: et.Element, XML date element for leap month
     """
-    return make_leap_month_exact_monthtext(m.group(1))
+    return make_leap_month_exact_monthtext(m.group(2), m.group(1))
 
 
 def make_leapmonth_yue(m):
-    # "閏月" -> <date><int>閏</int><month>月</month></date>
-    return make_leap_month_exact_monthtext("月")
+    # "閏月" / "闰月" -> <date><int>…</int><month>月</month></date>
+    return make_leap_month_exact_monthtext("月", m.group(1))
 
 
 def tag_basic_tokens(xml_root):
@@ -238,8 +242,8 @@ def tag_basic_tokens(xml_root):
 def promote_gz_to_sexyear(xml_root):
     """
     Promote sexagenary day (gz) elements to sexagenary year (sexYear) when:
-    1. Preceded by explicit year markers like 歲次 or 歲在, OR
-    2. Followed by 年 or 歲 (e.g., "甲子年" where gz wasn't caught by SEXYEAR_RE)
+    1. Preceded by explicit year markers like 歲次/岁次 or 歲在/岁在, OR
+    2. Followed by 年, 歲, or 岁 (e.g., "甲子年" where gz wasn't caught by SEXYEAR_RE)
     
     Lonely sexagenary binomes without fillers should remain as gz (day), not be
     promoted to sexYear (year).
@@ -251,9 +255,9 @@ def promote_gz_to_sexyear(xml_root):
         prev = d.getprevious()
         has_year_marker = False
         filler_text = ""
-        filler_position = "before"  # "before" for 歲次/歲在, "after" for 年/歲 suffix
+        filler_position = "before"  # "before" for 歲次/岁次/歲在/岁在, "after" for 年/歲/岁 suffix
 
-        # Check for prefix markers (歲次 or 歲在)
+        # Check for prefix markers (歲次/岁次 or 歲在/岁在)
         if prev is None:
             s = d.getparent().text or ""
             loc = ("parent", d.getparent())
@@ -273,11 +277,11 @@ def promote_gz_to_sexyear(xml_root):
             else:
                 loc[1].tail = new_s
 
-        # Check for suffix markers (年 or 歲) if no prefix found
+        # Check for suffix markers (年, 歲, or 岁) if no prefix found
         if not has_year_marker:
             tail = d.tail or ""
-            # Check if tail starts with 年 or 歲 (possibly with punctuation)
-            suffix_match = re.match(r"^([，,\s]*)([年歲])", tail)
+            # Check if tail starts with 年, 歲, or 岁 (possibly with punctuation)
+            suffix_match = re.match(r"^([，,\s]*)([年歲岁])", tail)
             if suffix_match:
                 has_year_marker = True
                 filler_text = suffix_match.group(2)
@@ -429,14 +433,25 @@ def attach_suffixes(xml_root: et.Element) -> et.Element:
     return xml_root
 
 
-def tag_date_elements(text, civ=None):
+def tag_date_elements(text, civ=None, fuzzy=False):
     """
     Tag and clean Chinese string containing date with relevant elements for extraction. Each date element remains
     separated, awaiting "consolidation."
-    :param text: str
+
+    :param text: str, date string (typically already normalized when fuzzy=True)
     :param civ: str ('c', 'j', 'k') or list (['c', 'j', 'k']) to filter by civilization
+    :param fuzzy: bool, if True, use simplified Chinese tag columns (string_simp, era_name_simp)
+        when building dynasty, era, and ruler regex lists; if False, use traditional forms
     :return: str (XML)
     """
+    # Column names
+    if fuzzy:
+        era_tag_column = 'era_name_simp'
+        tag_column = 'string_simp'
+    else:
+        era_tag_column = 'era_name'
+        tag_column = 'string'
+    
     # Test if input is XML, if not, wrap in <root> tags to make it XML
     try:
         xml_root = et.fromstring(text.encode("utf-8"))
@@ -502,16 +517,16 @@ def tag_date_elements(text, civ=None):
         era_tag_df = era_tag_df[era_tag_df['cal_stream'].astype(float).isin(cal_streams)]
     dyn_tag_df, ruler_tag_df = load_tag_tables(civ=civ)
     # Reduce to lists
-    era_tag_list = era_tag_df['era_name'].unique()
-    dyn_tag_list = dyn_tag_df['string'].unique()
+    era_tag_list = era_tag_df[era_tag_column].unique()
+    dyn_tag_list = dyn_tag_df[tag_column].unique()
     
     # Split ruler tags into regular and era_prefix_only
     if 'era_prefix_only' in ruler_tag_df.columns:
-        era_prefix_ruler_tags = ruler_tag_df[ruler_tag_df['era_prefix_only'] == True]['string'].unique()
-        regular_ruler_tags = ruler_tag_df[ruler_tag_df['era_prefix_only'] != True]['string'].unique()
+        era_prefix_ruler_tags = ruler_tag_df[ruler_tag_df['era_prefix_only'] == True][tag_column].unique()
+        regular_ruler_tags = ruler_tag_df[ruler_tag_df['era_prefix_only'] != True][tag_column].unique()
     else:
         era_prefix_ruler_tags = []
-        regular_ruler_tags = ruler_tag_df['string'].unique()
+        regular_ruler_tags = ruler_tag_df[tag_column].unique()
     ruler_tag_list = list(regular_ruler_tags) + list(era_prefix_ruler_tags)  # Keep for backward compatibility
     # Normal dates #####################################################################################################
     # Tag 改元 first so later passes don't mis-tag the 元 inside it (e.g. as a dynasty).
@@ -729,7 +744,7 @@ def tag_date_elements(text, civ=None):
     def _date_child_tags(d: et._Element) -> set[str]:
         return {c.tag for c in d if isinstance(c.tag, str)}
 
-    def _maybe_insert_bare_qi_before_next_date(parent: et._Element, before_node: et._Element | None) -> None:
+    def _maybe_insert_bare_qi_before_next_date(parent: et._Element, before_node: Optional[et._Element]) -> None:
         """
         If the text slot right before the next sibling <date> ends with bare '其' (optionally followed by whitespace),
         replace that '其' with a <rel dir="其" unit="">其</rel> element.
@@ -845,7 +860,7 @@ def tag_date_elements(text, civ=None):
                 attach_ok = bool(next_tags & YEAR_OR_LOWER_TAGS)
 
             # 是歲 / 其歲 / 今歲 (and 是年/其年/今年) may precede dyn/ruler/era, but only attach if the cluster has year/sexYear or lower.
-            elif dir_ in {"是", "其", "今"} and unit in {"歲", "年"}:
+            elif dir_ in {"是", "其", "今"} and unit in {"歲", "岁", "年"}:
                 attach_ok = bool(cluster_tags & YEAR_OR_LOWER_TAGS)
 
             # Optional: 是月 / 其月 / 今月 attach only if the cluster has month or lower.

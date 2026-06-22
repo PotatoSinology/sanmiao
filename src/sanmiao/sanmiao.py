@@ -2,7 +2,7 @@ import pandas as pd
 import re
 import lxml.etree as et
 # Import modules
-from .loaders import prepare_tables
+from .loaders import prepare_tables, normalise_for_search, load_normalisation_map
 from .config import (
     DEFAULT_TPQ, DEFAULT_TAQ, DEFAULT_GREGORIAN_START,
     get_phrase_dic
@@ -12,7 +12,7 @@ from .reporting import jdn_to_ccs, jy_to_ccs, generate_report_from_dataframe
 from .tagging import tag_date_elements, consolidate_date, index_date_nodes
 from .bulk_processing import extract_date_table_bulk, add_can_names_bulk, dates_xml_to_df
 
-def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True):
+def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEFAULT_TPQ, taq=DEFAULT_TAQ, civ=None, sequential=True, fuzzy=True):
     """
     Main Chinese calendar date interpreter that processes various input formats.
 
@@ -25,7 +25,9 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
     :param taq: int, latest date (terminus ante quem)
     :param civ: str or list, civilization filter
     :param sequential: bool, process dates sequentially
-    :param proliferate: bool, allow date proliferation
+    :param fuzzy: bool, if True, normalize input to simplified Chinese before tagging and use
+        simplified dynasty, era, and ruler tag columns for matching. Enables cross-script input
+        (traditional, simplified, or Japanese character forms). Defaults to True.
     :return: str, formatted interpretation report
     """
     # Defaults
@@ -56,6 +58,9 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
         'intercalary': None,
         'sex_year': None
     }
+    
+    # Load character map for normalization
+    char_map = load_normalisation_map() if fuzzy else None
     
     for item in items:
         if item != '':
@@ -103,8 +108,13 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                         'sex_year': None
                     }
                 
+                # Keep original for report headers; normalize a copy for tagging
+                user_input = item
+                if fuzzy:
+                    item = normalise_for_search(item, char_map)
+
                 # Convert string to XML, tag all date elements
-                xml_string = tag_date_elements(item, civ=civ)
+                xml_string = tag_date_elements(item, civ=civ, fuzzy=fuzzy)
                 
                 # Consolidate adjacent date elements
                 xml_string = consolidate_date(xml_string)
@@ -124,11 +134,12 @@ def cjk_date_interpreter(ui, lang='en', jd_out=False, pg=False, gs=None, tpq=DEF
                 # Extract dates using optimized bulk function
                 xml_string, output_df, implied, _xml_modified = extract_date_table_bulk(
                     xml_root, implied=implied, pg=pg, gs=gs, lang=lang, tpq=tpq, taq=taq, 
-                    civ=civ, tables=tables, sequential=sequential, proliferate=proliferate
+                    civ=civ, tables=tables, sequential=sequential, proliferate=proliferate, fuzzy=fuzzy,
+                    original_text=user_input, normalized_text=item,
                 )
-                print(xml_string)
+                
                 # Extract tables for canonical name addition
-                era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names = tables
+                era_df, dyn_df, _, _, _, _, ruler_can_names = tables
 
                 # Add canonical names to all results
                 if not output_df.empty:

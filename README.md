@@ -4,7 +4,7 @@
 
 Author: Daniel Patrick Morgan (CNRS-CRCAO)
 
-Sanmiao is a Python package for date conversion to and from Chinese, Japanese, and Korean historical calendars (3rd cent. B.C.–20th cent.) written by a historian of astronomy. 
+Sanmiao is a Python package for date conversion to and from Chinese, Japanese, and Korean historical calendars (3rd cent. B.C.–20th cent.) written by a historian of astronomy. This package is the back end for the [Sanmiao web app](https://norbert.huma-num.fr/app/sanmiao/index.html).
 
 GitHub: [https://github.com/PotatoSinology/sanmiao](https://github.com/PotatoSinology/sanmiao)
 
@@ -57,7 +57,8 @@ result = sanmiao.cjk_date_interpreter(
     tpq=-500,  # Terminus post quem (earliest date), defaults to -500
     taq=2050,  # Terminus ante quem (latest date), defaults to 2050
     civ=None,  # Civilisation/s, defaults to ['c', 'j', 'k'] if None; set to ['c'] for China only, ['j'] for Japan only, ['k'] for Korea only
-    sequential=True  # Intelligently fills missing fields in Sinitic date strings from previous ones (when False, proliferate mode finds all candidates for date strings without dynasty, ruler, or era)
+    sequential=True,  # Intelligently fills missing fields in Sinitic date strings from previous ones (when False, proliferate mode finds all candidates for date strings without dynasty, ruler, or era)
+    fuzzy=True,  # Cross-script matching (traditional/simplified Chinese, Japanese forms); default True for reports
     )
 ```
 
@@ -86,6 +87,15 @@ xml_string, output_df, implied, xml_modified = extract_date_table_bulk(
 )
 ```
 
+## 'Fuzzy matching'
+
+As of version 0.2.6, Sanmiao features **fuzzy matching**, which normalises input and matches dynasty, era, and ruler names using simplified Chinese forms (`string_simp` / `era_name_simp` in the tag tables). This allows date strings in traditional Chinese, simplified Chinese, or Japanese character forms to be interpreted correctly. Report **headers** echo the user’s original input; resolved **match lines** use traditional canonical names from the tables.
+
+- `cjk_date_interpreter(..., fuzzy=True)` — default for conversion reports (web app).
+- `tag_date_elements()`, `extract_date_table_bulk()`, and related XML functions — default `fuzzy=False` for backward-compatible tagging.
+
+For bulk/XML pipelines with `fuzzy=True`, pass `original_text` and `normalized_text` to `extract_date_table_bulk()` to preserve original script in `date_string`, or call `restore_original_date_strings()` on the output dataframe.
+
 ## Sources
 
 Sanmiao uses historical tables based on those of Zhang Peiyu[^1] and Uchida Masao,[^2] and it is updated to include new archaeological evidence[^3] as well as minor dynasties and reign eras. The tables are based on calculation from contemporary procedure texts (_lifa_ 曆法), eclipses, and recorded dates. I have supplemented these for the moment with tables from the [Buddhist Studies Time Authority Databases](https://authority.dila.edu.tw/time/) for the Sun-Wu, Liu-Shu, Liao, Jin, and Korea.
@@ -111,3 +121,18 @@ The preferred method to contribute is through forking and pull requests:
 3. Commit your changes (`git commit -am 'Add some fooBar'`)
 4. Push to the branch (`git push origin feature/fooBar`)
 5. Create a new Pull Request
+
+## Supply chain security
+
+Releases published to PyPI from GitHub Actions use [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (no long-lived API tokens in the repository) and [PEP 740 digital attestations](https://peps.python.org/pep-0740/) signed via [Sigstore](https://www.sigstore.dev/). Each wheel and sdist is cryptographically linked to the GitHub workflow that built and uploaded it.
+
+To verify a release manually:
+
+```sh
+pip install pypi-attestations
+pypi-attestations verify pypi \
+  --repository https://github.com/PotatoSinology/sanmiao \
+  pypi:sanmiao-<version>-py3-none-any.whl
+```
+
+Replace `<version>` with the release you want to check. See the [PyPI attestation documentation](https://docs.pypi.org/attestations/consuming-attestations/) for details.

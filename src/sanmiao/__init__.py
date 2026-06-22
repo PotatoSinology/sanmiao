@@ -1,4 +1,4 @@
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 # Import from modules
 from .converters import gz_year, jdn_to_gz, ganshu, numcon, iso_to_jdn, jdn_to_iso
@@ -8,7 +8,7 @@ from .config import phrase_dic_en, phrase_dic_fr, phrase_dic_zh, phrase_dic_ja, 
 from .utils import guess_variant
 from .solving import solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints
 from .reporting import jdn_to_ccs, jy_to_ccs, generate_report_from_dataframe
-from .bulk_processing import extract_date_table, extract_date_table_bulk, dates_xml_to_df, normalise_date_fields, bulk_resolve_dynasty_ids, bulk_resolve_ruler_ids, bulk_resolve_era_ids
+from .bulk_processing import extract_date_table, extract_date_table_bulk, dates_xml_to_df, normalise_date_fields, bulk_resolve_dynasty_ids, bulk_resolve_ruler_ids, bulk_resolve_era_ids, restore_original_date_strings
 from .tagging import tag_date_elements, consolidate_date, index_date_nodes
 from .xml_processing import filter_annals, backwards_fill_days
 from .loaders import prepare_tables

@@ -53,13 +53,13 @@ def prepare_tables(civ=None):
     return era_df, dyn_df, ruler_df, lunar_table, dyn_tag_df, ruler_tag_df, ruler_can_names
 
 
-
-
 def load_num_tables(civ=None):
     """
     Load and filter numerical tables (era, dynasty, ruler, lunar) by civilization.
 
     :param civ: list or str, civilization codes to filter by ('c', 'j', 'k')
+    :param fuzzy: bool, if True, replace era_name with era_name_simp in era_df for
+        simplified Chinese matching; if False, drop era_name_simp and keep traditional era names
     :return: tuple of DataFrames (era_df, dyn_df, ruler_df, lunar_table)
     """
     # Default civilisations
@@ -127,5 +127,33 @@ def load_tag_tables(civ=None):
         ruler_tag_df = ruler_tag_df[ruler_tag_df['person_id'].isin(valid_person_ids)]
     else:
         ruler_tag_df = ruler_tag_df.iloc[0:0]  # Empty dataframe with same structure
-    
+
     return dyn_tag_df, ruler_tag_df
+
+
+def load_normalisation_map():
+    """
+    Load character map for cross-script normalization (fuzzy mode).
+
+    Reads sanmiao_fuzzy_chars.csv (Variant→Norm pairs) for use with normalise_for_search().
+    Maps traditional, variant, and Japanese character forms to simplified Chinese.
+
+    :return: dict[str, str], character map (Variant → Norm)
+    """
+    df = load_csv('sanmiao_fuzzy_chars.csv')
+    char_map = dict(zip(df['Variant'], df['Norm']))
+    return char_map
+
+
+def normalise_for_search(text: str, char_map: dict[str, str]) -> str:
+    """
+    Normalize text to simplified Chinese for fuzzy matching.
+
+    Replaces each character through char_map; characters not in the map pass through
+    unchanged. Used on user input before tagging when fuzzy=True.
+
+    :param text: str, text to normalize
+    :param char_map: dict[str, str], character map from load_normalisation_map()
+    :return: str, normalized text in simplified Chinese search form
+    """
+    return ''.join(char_map.get(ch, ch) for ch in text)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sanmiao"
-version = "0.2.5"
+version = "0.2.6"
 authors = [
     {name = "Daniel Patrick Morgan", email = "daniel.morgan@college-de-france.fr"}
 ]
@@ -32,6 +32,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering"
 ]
+
+[project.optional-dependencies]
+fuzzy = ["opencc-python-reimplemented>=0.1.7"]
+
 [project.urls]
 Homepage = "https://github.com/PotatoSinology/sanmiao"
 Repository = "https://github.com/PotatoSinology/sanmiao.git"
