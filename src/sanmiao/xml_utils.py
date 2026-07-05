@@ -4,6 +4,8 @@ import re
 import lxml.etree as et
 from typing import Callable, Any
 
+from .ns import child_local_names, is_tag, local_name, tag_in, xpath_dates
+
 # Regex patterns for XML processing
 WS_RE = re.compile(r"\s+")
 
@@ -54,7 +56,7 @@ def remove_lone_tags(xml_string: str) -> et._Element:
         # Return a dummy element if parsing fails
         return et.Element("root")
 
-    for node in xml_root.xpath('.//date'):
+    for node in xpath_dates(xml_root):
         # Common false positives from prose (e.g. "一年", "一月", "一日")
         # that don't carry enough information to resolve as dates.
         if node.xpath('normalize-space(string())') in ('一月', '一年', '一日'):
@@ -68,7 +70,7 @@ def remove_lone_tags(xml_string: str) -> et._Element:
         if s == 1:
             node.tag = 'to_remove'
         # Dynasty, emperor, or era without anything else
-        tags = [sn.tag for sn in node.xpath('./*')]
+        tags = child_local_names(node)
         if len(tags) == 1 and tags[0] in ('dyn', 'ruler', 'era'):
             for child in node:
                 child.tag = 'to_remove'
@@ -117,17 +119,14 @@ def fix_dynasty_mismatch_xml(xml_string: str, mismatch_date_indices: set) -> str
     mismatch_str = {str(i) for i in mismatch_date_indices}
 
     for node in root.iter():
-        tag = node.tag.split('}')[-1] if '}' in node.tag else node.tag
-        if tag != 'date':
+        if not is_tag(node, 'date'):
             continue
         idx = node.get('index')
         if idx is None or str(idx) not in mismatch_str:
             continue
-        # Find <dyn> child (namespace-agnostic)
         dyn = None
         for child in node:
-            ctag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-            if ctag == 'dyn':
+            if is_tag(child, 'dyn'):
                 dyn = child
                 break
         if dyn is None:
@@ -166,8 +165,7 @@ def date_indices_in_xml_string(xml_string: str) -> set:
         return set()
     out = set()
     for node in root.iter():
-        tag = node.tag.split('}')[-1] if '}' in node.tag else node.tag
-        if tag != 'date':
+        if not is_tag(node, 'date'):
             continue
         idx = node.get('index')
         if idx is not None:
@@ -190,7 +188,7 @@ def strip_text(xml_root: et._Element) -> et._Element:
     # Create a new root element for the filtered output
     new_root = et.Element("root")
     # Copy only <date> elements into the new root
-    for date in xml_root.findall(".//date"):
+    for date in xpath_dates(xml_root):
         date.tail = None
         new_root.append(date)
 
@@ -218,7 +216,7 @@ def replace_in_text_and_tail(xml_root: et._Element, pattern: re.Pattern,
 
     def process_element(elem: et._Element) -> None:
         # Skip certain tags entirely
-        if elem.tag in skip_all_tags:
+        if tag_in(elem, skip_all_tags):
             return
 
         # Process tail text
@@ -240,7 +238,7 @@ def replace_in_text_and_tail(xml_root: et._Element, pattern: re.Pattern,
                         elem.tail = elem.tail[:match.start()] + elem.tail[match.end():]
 
         # Process text content (unless tag is in skip_text_tags)
-        if elem.text and elem.tag not in skip_text_tags:
+        if elem.text and not tag_in(elem, skip_text_tags):
             matches = list(pattern.finditer(elem.text))
             if matches:
                 # Process matches in reverse order

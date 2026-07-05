@@ -5,6 +5,15 @@ from .loaders import (
     load_csv, load_tag_tables
 )
 from .config import get_cal_streams_from_civ
+from .ns import (
+    child_local_names,
+    detect_wrapper_namespace,
+    find_child,
+    is_tag,
+    make_element,
+    tag_in,
+    xpath_dates,
+)
 from .xml_utils import (
     strip_ws_in_text_nodes, clean_attributes, replace_in_text_and_tail
 )
@@ -58,6 +67,13 @@ ERA_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世
 DYNASTY_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世)")
 RULER_SUFFIX_RE = re.compile(r"^(之?初|中|之?末|之?季|末年|之?時|之世|即位|踐阼)")
 
+# Namespace for outer <date> wrappers when tagging inside TEI (children stay unprefixed).
+_wrapper_ns: Optional[str] = None
+
+
+def _new_date() -> et._Element:
+    return make_element("date", _wrapper_ns)
+
 
 def replace_in_text_and_tail(
     xml_root,
@@ -101,10 +117,10 @@ def replace_in_text_and_tail(
             # Decide which slots to process
             # CRITICAL: Even if element is in skip_all_tags, we still process its tail!
             # The tail of a <date> element might contain more patterns.
-            if el.tag in skip_all_tags:
+            if tag_in(el, skip_all_tags):
                 # Skip processing text (children) of these elements, but process tail
                 slots = ("tail",)
-            elif el.tag in skip_text_tags:
+            elif tag_in(el, skip_text_tags):
                 slots = ("tail",)
             else:
                 slots = ("text", "tail")
@@ -159,7 +175,7 @@ def make_simple_date(tagname, group=1):
     :return: function that creates XML date elements
     """
     def _mk(m):
-        d = et.Element("date")
+        d = _new_date()
         c = et.SubElement(d, tagname)
         c.text = m.group(group)
         return d
@@ -170,7 +186,7 @@ def make_sexyear(m):
     """
     Create a date element with sexYear structure: <date><sexYear>甲子<filler>年</filler></sexYear></date>
     """
-    d = et.Element("date")
+    d = _new_date()
     sy = et.SubElement(d, "sexYear")
     sy.text = m.group(1)  # sexagenary part (甲子 etc.)
     filler = et.SubElement(sy, "filler")
@@ -186,7 +202,7 @@ def make_leap_month_exact_monthtext(month_text: str, int_text: str):
     :param int_text: str, intercalary marker as matched in input (閏 or 闰)
     :return: et.Element, XML date element for leap month
     """
-    d = et.Element("date")
+    d = _new_date()
     i = et.SubElement(d, "int")
     i.text = int_text
     m = et.SubElement(d, "month")
@@ -251,7 +267,7 @@ def promote_gz_to_sexyear(xml_root):
     :param xml_root: et.Element, root of XML tree to process
     :return: et.Element, modified XML root
     """
-    for d in xml_root.xpath(".//date[gz]"):
+    for d in xpath_dates(xml_root, with_gz=True):
         prev = d.getprevious()
         has_year_marker = False
         filler_text = ""
@@ -295,7 +311,7 @@ def promote_gz_to_sexyear(xml_root):
         gz_text = d.findtext("gz")
 
         # Find the gz element and replace it with sexYear
-        gz_elem = d.find("gz")
+        gz_elem = find_child(d, "gz")
         if gz_elem is not None:
             # Create sexYear element to replace gz
             sy = et.Element("sexYear")
@@ -323,7 +339,7 @@ def promote_nmdgz(xml_root):
     :param xml_root: et.Element, root of XML tree to process
     :return: et.Element, modified XML root
     """
-    for gz_date in list(xml_root.xpath(".//date[gz]")):
+    for gz_date in list(xpath_dates(xml_root, with_gz=True)):
         parent = gz_date.getparent()
         gz_text = gz_date.findtext("gz")
         if not gz_text:
@@ -336,7 +352,7 @@ def promote_nmdgz(xml_root):
             rest = PUNCT_RE.sub("", tail[1:])
             next_el = gz_date.getnext()
 
-            if next_el is not None and next_el.tag == "date" and next_el.find("day") is not None:
+            if next_el is not None and is_tag(next_el, "date") and find_child(next_el, "day") is not None:
                 # Clean tail of gz_date
                 gz_date.tail = rest
 
@@ -367,7 +383,7 @@ def promote_nmdgz(xml_root):
 
         if s.endswith("朔"):
             next_el = gz_date.getnext()
-            if next_el is not None and next_el.tag == "date" and next_el.find("day") is not None:
+            if next_el is not None and is_tag(next_el, "date") and find_child(next_el, "day") is not None:
                 # Remove trailing 朔
                 new_s = s[:-1]
                 if loc[0] == "parent":
@@ -403,17 +419,17 @@ def attach_suffixes(xml_root: et.Element) -> et.Element:
     Same for <ruler> and <dyn>.
     """
     # Snapshot because we mutate tails
-    for d in list(xml_root.xpath(".//date")):
+    for d in list(xpath_dates(xml_root)):
         tail = d.tail or ""
         if not tail:
             continue
 
         # Decide which suffix regex applies based on content
-        if d.find("ruler") is not None:
+        if find_child(d, "ruler") is not None:
             m = RULER_SUFFIX_RE.match(tail)
-        elif d.find("era") is not None:
+        elif find_child(d, "era") is not None:
             m = ERA_SUFFIX_RE.match(tail)
-        elif d.find("dyn") is not None:
+        elif find_child(d, "dyn") is not None:
             m = DYNASTY_SUFFIX_RE.match(tail)
         else:
             continue
@@ -452,6 +468,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
         era_tag_column = 'era_name'
         tag_column = 'string'
     
+    global _wrapper_ns
     # Test if input is XML, if not, wrap in <root> tags to make it XML
     try:
         xml_root = et.fromstring(text.encode("utf-8"))
@@ -467,6 +484,8 @@ def tag_date_elements(text, civ=None, fuzzy=False):
     if xml_root is None:
         xml_root = et.Element("root")
         xml_root.text = text if text else ""
+
+    _wrapper_ns = detect_wrapper_namespace(xml_root)
     
     # Defaults
     if civ is None:
@@ -550,7 +569,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
         era_pattern = re.compile("(" + "|".join(map(re.escape, era_tag_list)) + ")")
 
         def make_era(match):
-            d = et.Element("date")
+            d = _new_date()
             e = et.SubElement(d, "era")
             e.text = match.group(1)
             return d
@@ -567,10 +586,10 @@ def tag_date_elements(text, civ=None, fuzzy=False):
                 
                 # Collect only top-level date elements (filter nested ones during collection)
                 date_elements = []
-                for date_el in xml_root.iter("date"):
+                for date_el in xpath_dates(xml_root):
                     # Skip if nested inside another date element (check only direct parent)
                     parent = date_el.getparent()
-                    if parent is not None and parent.tag == "date":
+                    if parent is not None and is_tag(parent, "date"):
                         continue
                     date_elements.append(date_el)
                 
@@ -630,7 +649,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
             era_prefix_ruler_pattern = re.compile("(" + "|".join(map(re.escape, era_prefix_ruler_list)) + ")")
 
             def make_ruler(match):
-                d = et.Element("date")
+                d = _new_date()
                 e = et.SubElement(d, "ruler")
                 e.text = match.group(1)
                 return d
@@ -646,12 +665,12 @@ def tag_date_elements(text, civ=None, fuzzy=False):
                     
                     # Find all date elements that contain era elements
                     date_elements_with_era = []
-                    for date_el in xml_root.iter("date"):
+                    for date_el in xpath_dates(xml_root):
                         # Check if this date element contains an era
-                        if date_el.find("era") is not None:
+                        if find_child(date_el, "era") is not None:
                             # Skip if nested inside another date element
                             parent = date_el.getparent()
-                            if parent is not None and parent.tag == "date":
+                            if parent is not None and is_tag(parent, "date"):
                                 continue
                             date_elements_with_era.append(date_el)
                     
@@ -705,7 +724,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
         ruler_pattern = re.compile("(" + "|".join(map(re.escape, regular_ruler_list)) + ")")
 
         def make_ruler(match):
-            d = et.Element("date")
+            d = _new_date()
             e = et.SubElement(d, "ruler")
             e.text = match.group(1)
             return d
@@ -720,7 +739,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
         dyn_pattern = re.compile("(" + "|".join(map(re.escape, dyn_tag_list)) + ")")
 
         def make_dyn(match):
-            d = et.Element("date")
+            d = _new_date()
             e = et.SubElement(d, "dyn")
             e.text = match.group(1)
             return d
@@ -742,7 +761,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
     YEAR_OR_LOWER_TAGS = {"year", "sexYear", "month", "day", "gz", "nmdgz", "int", "lp", "season", "lp_filler", "filler"}
 
     def _date_child_tags(d: et._Element) -> set[str]:
-        return {c.tag for c in d if isinstance(c.tag, str)}
+        return set(child_local_names(d))
 
     def _maybe_insert_bare_qi_before_next_date(parent: et._Element, before_node: Optional[et._Element]) -> None:
         """
@@ -759,7 +778,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
             next_el = before_node.getnext()
             setter = ("tail", before_node)
 
-        if not s or next_el is None or next_el.tag != "date":
+        if not s or next_el is None or not is_tag(next_el, "date"):
             return
 
         # Must end with bare '其' (allow trailing whitespace only)
@@ -820,7 +839,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
             if not JOINER_TAIL_RE.match(tail):
                 break
             nxt = cur.getnext()
-            if nxt is None or nxt.tag != "date":
+            if nxt is None or not is_tag(nxt, "date"):
                 break
             cluster.append(nxt)
             cur = nxt
@@ -834,7 +853,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
 
     for rel in list(xml_root.xpath(".//rel")):
         # Skip rel already inside a date
-        if rel.xpath("boolean(ancestor::date)"):
+        if rel.xpath("boolean(ancestor::*[local-name()=\"date\"])"):
             continue
 
         parent = rel.getparent()
@@ -845,7 +864,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
         rel_tail = rel.tail or ""
 
         # Case A: immediately before a <date>
-        if next_el is not None and next_el.tag == "date" and rel_tail.strip() == "":
+        if next_el is not None and is_tag(next_el, "date") and rel_tail.strip() == "":
             dir_ = (rel.get("dir") or "").strip()
             unit = (rel.get("unit") or "").strip()
 
@@ -888,7 +907,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
             rel.tail = None
 
             # Create <date> wrapper and move rel inside it
-            d = et.Element("date")
+            d = _new_date()
             parent.insert(idx, d)
             parent.remove(rel)
             d.append(rel)
@@ -909,7 +928,7 @@ def tag_date_elements(text, civ=None, fuzzy=False):
 
     # Clean nested tags ################################################################################################
     # Remove lone tags
-    for node in xml_root.xpath('.//date'):
+    for node in xpath_dates(xml_root):
         s = node.xpath('string()')
         bad = ['一年', '一日']
         if s in bad:
@@ -984,19 +1003,21 @@ def clean_nested_tags(text):
     :return: str, cleaned XML string
     """
     xml_root = et.ElementTree(et.fromstring(text)).getroot()
-    # Clean
-    for node in xml_root.xpath('.//date//date'):
-        node.tag = 'to_remove'
-    for tag in ['dyn', 'ruler', 'year', 'month', 'season', 'day', 'gz', 'lp', 'sexYear', 'nmdgz', 'lp_to_remove']:
-        for node in xml_root.findall(f'.//{tag}//*'):
+    # Clean nested date inside date
+    for node in xpath_dates(xml_root):
+        parent = node.getparent()
+        if parent is not None and is_tag(parent, "date"):
             node.tag = 'to_remove'
-    for node in xml_root.findall('.//date'):
-        heads = node.xpath('.//ancestor::head')
+    for tag in ['dyn', 'ruler', 'year', 'month', 'season', 'day', 'gz', 'lp', 'sexYear', 'nmdgz', 'lp_to_remove']:
+        for node in xml_root.xpath(f'.//*[local-name()="{tag}"]//*'):
+            node.tag = 'to_remove'
+    for node in xpath_dates(xml_root):
+        heads = node.xpath('.//*[local-name()="head"]')
         if len(heads) == 0:
-            elements = [sn.tag for sn in node.findall('./*')]
+            elements = child_local_names(node)
             # Clean dynasty only
             if elements == ['dyn'] or elements == ['season'] or elements == ['era'] or elements == ['ruler']:
-                for sn in node.findall('.//*'):
+                for sn in node:
                     sn.tag = 'to_remove'
                 node.tag = 'to_remove'
     # Strip tags
@@ -1009,17 +1030,10 @@ def clean_nested_tags(text):
 
 def index_date_nodes(xml_root) -> et._Element:
     """
-    Index date nodes in XML element.
+    Index date nodes in XML element (namespace-aware via local-name).
     """
-    # Handle namespaces
-    ns = {}
-    if xml_root.tag.startswith('{'):
-        ns_uri = xml_root.tag.split('}')[0][1:]
-        ns = {'tei': ns_uri}
-
     index = 0
-    date_xpath = './/tei:date' if ns else './/date'
-    for node in xml_root.xpath(date_xpath, namespaces=ns):
+    for node in xpath_dates(xml_root):
         node.set('index', str(index))
         index += 1
 

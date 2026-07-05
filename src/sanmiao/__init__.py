@@ -15,3 +15,11 @@ from .loaders import prepare_tables
 
 # Import from main module
 from .sanmiao import cjk_date_interpreter
+from .tei_bridge import (
+    propose_dates,
+    propose_dates_from_xml_root,
+    propose_dates_json,
+    resolve_date_element,
+    extract_date_fragment,
+    row_to_tei_attrs,
+)

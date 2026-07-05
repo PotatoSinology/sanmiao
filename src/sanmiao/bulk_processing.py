@@ -12,6 +12,7 @@ from .converters import (
 )
 from .loaders import prepare_tables
 from .xml_utils import fix_dynasty_mismatch_xml, date_indices_in_xml_string
+from .ns import child_attr, child_text, has_child, xpath_dates
 from .solving import (
     solve_date_simple, solve_date_with_year, solve_date_with_lunar_constraints,
     add_jdn_and_iso_to_proliferate_candidates
@@ -321,44 +322,29 @@ def dates_xml_to_df(xml_root, attributes: bool = False) -> pd.DataFrame:
                        sex_year, month, intercalary, day, gz, nmd_gz, lp
     :return: pd.DataFrame, DataFrame with extracted date information
     """
-    # Handle namespaces - check if root has a default namespace
-    ns = {}
-    if xml_root.tag.startswith('{'):
-        # Extract namespace from root tag
-        ns_uri = xml_root.tag.split('}')[0][1:]
-        ns = {'tei': ns_uri}
-
     rows = []
-    # Use namespace-aware XPath
-    date_xpath = './/tei:date[@index]' if ns else './/date[@index]'
-    for node in xml_root.xpath(date_xpath, namespaces=ns):
-        # Always extract date_index and date_string
+    for node in xpath_dates(xml_root, indexed_only=True):
         row = {
             "date_index": int(node.attrib.get("index")),
-            "date_string": node.xpath("normalize-space(string())", namespaces=ns) if node.xpath("normalize-space(string())", namespaces=ns) else "",
+            "date_string": (node.xpath("normalize-space(string())") or "").strip() or "",
         }
-        
-        # Extract child elements (always done, as fallback for incomplete attributes)
-        def get1(xp):
-            result = node.xpath(f'normalize-space(string({xp}))', namespaces=ns)
-            return result if result and result.strip() else None
 
         row.update({
-            "dyn_str": get1(".//tei:dyn" if ns else ".//dyn"),
-            "ruler_str": get1(".//tei:ruler" if ns else ".//ruler"),
-            "era_str": get1(".//tei:era" if ns else ".//era"),
-            "rel_dir": get1(".//tei:rel/@dir" if ns else ".//rel/@dir"),
-            "rel_unit": get1(".//tei:rel/@unit" if ns else ".//rel/@unit"),
-            "rel_text": get1(".//tei:rel" if ns else ".//rel"),
-            "suffix_str": get1(".//tei:suffix" if ns else ".//suffix"),
-            "year_str": get1(".//tei:year" if ns else ".//year"),
-            "sexYear_str": get1(".//tei:sexYear" if ns else ".//sexYear"),
-            "month_str": get1(".//tei:month" if ns else ".//month"),
-            "day_str": get1(".//tei:day" if ns else ".//day"),
-            "gz_str": get1(".//tei:gz" if ns else ".//gz"),
-            "lp_str": get1(".//tei:lp" if ns else ".//lp"),
-            "nmd_gz_str": get1(".//tei:nmd_gz" if ns else ".//nmdgz"),
-            "has_int": 1 if node.xpath(".//tei:int" if ns else ".//int", namespaces=ns) else 0,
+            "dyn_str": child_text(node, "dyn"),
+            "ruler_str": child_text(node, "ruler"),
+            "era_str": child_text(node, "era"),
+            "rel_dir": child_attr(node, "rel", "dir"),
+            "rel_unit": child_attr(node, "rel", "unit"),
+            "rel_text": child_text(node, "rel"),
+            "suffix_str": child_text(node, "suffix"),
+            "year_str": child_text(node, "year"),
+            "sexYear_str": child_text(node, "sexYear"),
+            "month_str": child_text(node, "month"),
+            "day_str": child_text(node, "day"),
+            "gz_str": child_text(node, "gz"),
+            "lp_str": child_text(node, "lp"),
+            "nmd_gz_str": child_text(node, "nmdgz"),
+            "has_int": 1 if has_child(node, "int") else 0,
         })
         
         # If we have gz and lp = 0, also set nmd_gz to equal gz
