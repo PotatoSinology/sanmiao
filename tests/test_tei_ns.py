@@ -54,6 +54,16 @@ def test_propose_dates_plain_text():
     assert "date_string" in proposals[0]
 
 
+def test_propose_dates_fuzzy_preserves_original_script():
+    """Fuzzy tags on simplified forms but returns the user's original characters."""
+    proposals = propose_dates("義熙八年", civ=["c"], sequential=True, fuzzy=True)
+    assert len(proposals) >= 1
+    assert proposals[0]["date_string"] == "義熙八年"
+    inner = proposals[0].get("parseInnerXml") or ""
+    assert "義熙" in inner
+    assert "义熙" not in inner
+
+
 def test_extract_and_resolve_date_fragment():
     frag_xml = "<date index=\"0\"><era>太和</era><year>元年</year></date>"
     proposals = resolve_date_element(frag_xml, civ=["c"], sequential=True, fuzzy=False)

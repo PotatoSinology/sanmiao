@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.8] - 2026-07-05
+## [0.2.9] - 2026-07-05
 
 ### Added
-- TEI integration layer
+- JSON output
+
+### Fixed
+- TEI integration layer fuzzy pass-through
+
+## [0.2.8] - 2026-07-05
+
+### Fixed
+- TEI integration layer 
 
 ## [0.2.7] - 2026-06-22
 

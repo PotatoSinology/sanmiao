@@ -21,7 +21,7 @@ from .reporting import generate_report_from_dataframe
 from .tagging import consolidate_date, index_date_nodes, tag_date_elements
 from .xml_utils import remove_lone_tags, strip_text
 from .bulk_processing import extract_date_table_bulk, add_can_names_bulk
-from .ns import is_tag, strip_namespaces
+from .ns import is_tag, strip_namespaces, xpath_dates
 from .config import get_phrase_dic
 
 
@@ -82,6 +82,61 @@ def row_to_tei_attrs(
     return out
 
 
+def _collect_parse_inner_by_index(xml_root: et._Element) -> dict[int, str]:
+    """Inner XML (sanmiao children) for each indexed <date>, keyed by date_index."""
+    out: dict[int, str] = {}
+    for node in xpath_dates(xml_root):
+        raw = node.attrib.get("index")
+        if raw is None:
+            continue
+        try:
+            idx = int(raw)
+        except (TypeError, ValueError):
+            continue
+        out[idx] = _inner_xml(node)
+    return out
+
+
+def _plain_markup_text(markup: str) -> str:
+    """Text content of a markup fragment, spaces stripped (matches date_string normalization)."""
+    import re
+
+    return re.sub(r"<[^>]+>", "", markup).replace(" ", "").strip()
+
+
+def restore_original_markup(inner_xml: str, norm_surface: str, orig_surface: str) -> str:
+    """
+    Rewrite text nodes in sanmiao markup from normalized to original script.
+
+    Tagging runs on normalized text; inner XML reflects simplified forms. When
+    normalization is character-wise with preserved length, map text chars in order.
+    """
+    norm_surface = str(norm_surface).replace(" ", "")
+    orig_surface = str(orig_surface).replace(" ", "")
+    if not inner_xml or norm_surface == orig_surface or len(norm_surface) != len(orig_surface):
+        return inner_xml
+
+    out: list[str] = []
+    norm_i = 0
+    i = 0
+    while i < len(inner_xml):
+        if inner_xml[i] == "<":
+            close = inner_xml.find(">", i)
+            if close == -1:
+                out.append(inner_xml[i:])
+                break
+            out.append(inner_xml[i : close + 1])
+            i = close + 1
+        else:
+            if norm_i < len(norm_surface):
+                out.append(orig_surface[norm_i])
+                norm_i += 1
+            else:
+                out.append(inner_xml[i])
+            i += 1
+    return "".join(out)
+
+
 def _inner_xml(date_el: et._Element) -> str:
     parts = []
     if date_el.text:
@@ -136,12 +191,16 @@ def propose_dates_from_xml_root(
     gs: list | None = None,
     lang: str = "en",
     tables=None,
+    original_text: str | None = None,
+    normalized_text: str | None = None,
 ) -> list[dict[str, Any]]:
     """Tag + solve on an lxml root (plain <root> or TEI subtree)."""
     gs, civ = normalize_defaults(gs, civ)
     phrase_dic = get_phrase_dic(lang or "en")
 
     xml_root = index_date_nodes(xml_root)
+    parse_inner = _collect_parse_inner_by_index(xml_root)
+    norm_surface_by_index = {idx: _plain_markup_text(inner) for idx, inner in parse_inner.items()}
     xml_string, output_df, _, _ = extract_date_table_bulk(
         xml_root,
         implied=None,
@@ -156,6 +215,8 @@ def propose_dates_from_xml_root(
         proliferate=proliferate,
         fuzzy=fuzzy,
         attributes=attributes,
+        original_text=original_text,
+        normalized_text=normalized_text,
     )
 
     if tables is None:
@@ -179,6 +240,11 @@ def propose_dates_from_xml_root(
         }
         if status == "unique" and proposal["candidates"]:
             proposal["attrs"] = proposal["candidates"][0]["attrs"]
+        orig_ds = proposal["date_string"]
+        norm_ds = norm_surface_by_index.get(int(date_index), orig_ds)
+        inner = parse_inner.get(int(date_index))
+        if inner:
+            proposal["parseInnerXml"] = restore_original_markup(inner, norm_ds, orig_ds)
         proposals.append(proposal)
 
     return proposals
@@ -231,6 +297,8 @@ def propose_dates(
         gs=gs,
         lang=lang,
         tables=tables,
+        original_text=original if fuzzy else None,
+        normalized_text=work if fuzzy else None,
     )
 
 
@@ -262,3 +330,24 @@ def resolve_date_element(
 
 def propose_dates_json(text: str, **kwargs) -> str:
     return json.dumps(propose_dates(text, **kwargs), ensure_ascii=False, indent=2)
+
+
+def cli_main() -> None:
+    """
+    Read JSON from stdin, write proposals JSON to stdout.
+
+    Request shape::
+        {"text": "...", "civ": ["c","j","k"], "sequential": true, "fuzzy": true,
+         "tpq": -300, "taq": 800, "pg": false, "lang": "en"}
+    """
+    import sys
+
+    req = json.load(sys.stdin)
+    text = req.get("text", "")
+    opts = {k: v for k, v in req.items() if k != "text"}
+    proposals = propose_dates(text, **opts)
+    json.dump(proposals, sys.stdout, ensure_ascii=False)
+
+
+if __name__ == "__main__":
+    cli_main()
