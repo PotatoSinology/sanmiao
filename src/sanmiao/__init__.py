@@ -1,4 +1,4 @@
-__version__ = "0.2.9"
+__version__ = "0.2.10"
 
 # Import from modules
 from .converters import gz_year, jdn_to_gz, ganshu, numcon, iso_to_jdn, jdn_to_iso
@@ -15,6 +15,7 @@ from .loaders import prepare_tables
 
 # Import from main module
 from .sanmiao import cjk_date_interpreter
+from .date_authority import list_date_authority
 from .tei_bridge import (
     propose_dates,
     propose_dates_from_xml_root,
@@ -22,4 +23,6 @@ from .tei_bridge import (
     resolve_date_element,
     extract_date_fragment,
     row_to_tei_attrs,
+    tag_dates_batch,
+    resolve_dates_batch,
 )

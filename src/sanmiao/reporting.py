@@ -171,10 +171,10 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
             )
         else:
             df.loc[lunar_range_mask, "range_str"] = (
-                "（" + df.loc[lunar_range_mask, "start_gz"] +
-                df.loc[lunar_range_mask, "ISO_Date_Start"] +
-                " ~ " + df.loc[lunar_range_mask, "end_gz"] +
-                df.loc[lunar_range_mask, "ISO_Date_End"] + "）"
+                "（" + df.loc[lunar_range_mask, "start_gz"].astype(str) +
+                df.loc[lunar_range_mask, "ISO_Date_Start"].astype(str) +
+                " ~ " + df.loc[lunar_range_mask, "end_gz"].astype(str) +
+                df.loc[lunar_range_mask, "ISO_Date_End"].astype(str) + "）"
             )
 
     # Final date strings
@@ -187,7 +187,7 @@ def generate_report_from_dataframe(output_df, phrase_dic=phrase_dic_en, jd_out=F
             df.loc[jdn_mask, "jdn_str"] = "（JD " + df.loc[jdn_mask, "jdn"].astype(str) + "）"
         elif "ISO_Date" in df.columns:
             iso_mask = jdn_mask & df["ISO_Date"].notna()
-            df.loc[iso_mask, "jdn_str"] = "（" + df.loc[iso_mask, "ISO_Date"] + "）"
+            df.loc[iso_mask, "jdn_str"] = "（" + df.loc[iso_mask, "ISO_Date"].astype(str) + "）"
 
     # For dates with years but no specific JDN, show western year
     if "ind_year" in df.columns:
