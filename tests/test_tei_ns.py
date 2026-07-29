@@ -109,3 +109,23 @@ def test_resolve_dates_batch_sequential_context():
     assert results[1] is not None
     assert results[1]["status"] == "unique"
     assert "義熙三年" in results[1]["candidates"][0]["displayLine"]
+
+
+def test_resolve_dates_batch_does_not_duplicate_tail_text_after_child_element():
+    """
+    A <date> whose content is <child>...</child>trailing-text (e.g. a TEI
+    <choice> followed by literal text) must not have that trailing text
+    doubled in parseInnerXml. et.tostring(child) already includes the
+    child's tail by default; re-appending child.tail on top of that used to
+    duplicate it (regression for era-name text following a <choice>).
+    """
+    xml = (
+        '<date dyn_id="84" ruler_id="7605" era_id="272" year="1" cert="high" '
+        'cal_stream="1" ind_year="479" sex_year="56">'
+        "<choice><sic>太</sic><corr>建</corr></choice>元元年</date>"
+    )
+    results = resolve_dates_batch([xml], civ=["c"], sequential=False, fuzzy=False)
+    assert results[0] is not None
+    parse_inner = results[0]["parseInnerXml"]
+    assert parse_inner.count("元元年") == 1
+    assert parse_inner == "<choice><sic>太</sic><corr>建</corr></choice>元元年"

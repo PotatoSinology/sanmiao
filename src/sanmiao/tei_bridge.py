@@ -146,7 +146,7 @@ def _inner_xml(date_el: et._Element) -> str:
     if date_el.text:
         parts.append(date_el.text)
     for child in date_el:
-        parts.append(et.tostring(child, encoding="unicode", method="xml"))
+        parts.append(et.tostring(child, encoding="unicode", method="xml", with_tail=False))
         if child.tail:
             parts.append(child.tail)
     return "".join(parts).strip()
