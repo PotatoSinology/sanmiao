@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-07-29
+
+### Fixed
+- Duplicate tails on date with attributes but no internal tags
+
 ## [0.2.10] - 2026-07-06
 
 ### Added
@@ -136,7 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.10...HEAD
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.11...HEAD
+[0.2.10]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.6...v0.2.7
