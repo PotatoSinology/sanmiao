@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-08-03
+
+### Fixed
+- **Sequential relative years (`明年` / `去年` / `來年` / …):** bare relative-year markers now inherit dynasty/ruler/era from implied state even when they have no month or day. Previously that inheritance ran only for month/day anaphora, so LJB resolve and `propose_dates` often returned “Insufficient data” after a solid anchor such as 永明元年.
+- **TEI bridge soft warnings:** informational `relative date` notes no longer force `status: unresolved` or replace the Norbert display line. A uniquely solved 明年 now reports as `unique` with the full calendar string (e.g. 永明二年) while still carrying the soft warning in `error_str`.
+
 ## [0.2.11] - 2026-07-29
 
 ### Fixed
@@ -141,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Moved web app back end off of Huma-Num webcluster to PLMshift for stability.
 
-[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.11...HEAD
+[Unreleased]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.12...HEAD
+[0.2.11]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/PotatoSinology/sanmiao/compare/v0.2.7...v0.2.8

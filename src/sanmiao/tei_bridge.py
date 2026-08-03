@@ -157,6 +157,9 @@ def _candidate_from_row(row: pd.Series, phrase_dic: dict, pg: bool, gs: list) ->
     try:
         report = generate_report_from_dataframe(line_df, phrase_dic, jd_out=False)
         lines = [ln.strip() for ln in report.splitlines() if ln.strip()]
+        # Soft warnings like "relative date;" are appended after the real match line.
+        while lines and _is_soft_error_str(lines[-1]):
+            lines.pop()
         display = lines[-1] if lines else str(row.get("date_string", ""))
     except Exception:
         display = str(row.get("date_string", ""))
@@ -169,12 +172,23 @@ def _candidate_from_row(row: pd.Series, phrase_dic: dict, pg: bool, gs: list) ->
     }
 
 
+# Informational solve notes — must not mark an otherwise unique row unresolved.
+_SOFT_ERROR_MARKERS = ("relative date",)
+
+
+def _is_soft_error_str(err: str) -> bool:
+    parts = [p.strip() for p in str(err).replace("；", ";").split(";") if p.strip()]
+    if not parts:
+        return True
+    return all(any(marker in part for marker in _SOFT_ERROR_MARKERS) for part in parts)
+
+
 def _status_for_group(group: pd.DataFrame) -> str:
     if group.empty:
         return "unresolved"
     if "error_str" in group.columns:
-        errs = group["error_str"].fillna("").astype(str).str.strip()
-        ok = group[errs == ""]
+        errs = group["error_str"].fillna("").astype(str)
+        ok = group[errs.map(lambda e: str(e).strip() == "" or _is_soft_error_str(e))]
     else:
         ok = group
     if len(ok) == 0:

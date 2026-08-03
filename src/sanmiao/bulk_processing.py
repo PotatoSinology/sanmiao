@@ -2070,8 +2070,11 @@ def extract_date_table_bulk(
             )
             
             if sequential:
-                if no_year:  # No year but some sort of day
-                    if not no_month or not no_day:
+                if no_year:  # No absolute year yet — may still inherit higher context
+                    # Month/day anaphora (三月/甲子) AND relative-year markers (明年/去年)
+                    # need dyn/ruler/era from implied. Relative years must NOT copy the
+                    # previous year value (suppress_inherited_year); they shift it later.
+                    if not no_month or not no_day or suppress_inherited_year:
                         # Pick up year and everything higher from implied
                         if (implied.get('cal_stream_ls') and len(implied['cal_stream_ls']) == 1 and ('cal_stream' not in g.columns or g['cal_stream'].isna().all())):
                             g['cal_stream'] = implied['cal_stream_ls'][0]

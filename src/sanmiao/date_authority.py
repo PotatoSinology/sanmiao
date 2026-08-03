@@ -35,12 +35,13 @@ def _pick_ruler_label(
     ruler_tag_df: pd.DataFrame,
     ruler_can_names: pd.DataFrame,
 ) -> str:
-    tags = ruler_tag_df.loc[ruler_tag_df["person_id"] == person_id, "string"].dropna()
-    if not tags.empty:
-        return str(min(tags, key=lambda s: len(str(s))))
+    # Prefer canonical/temple names (高祖) over shorter personal/tag strings (劉邦).
     can = ruler_can_names.loc[ruler_can_names["person_id"] == person_id, "string"].dropna()
     if not can.empty:
         return str(can.iloc[0])
+    tags = ruler_tag_df.loc[ruler_tag_df["person_id"] == person_id, "string"].dropna()
+    if not tags.empty:
+        return str(min(tags, key=lambda s: len(str(s))))
     return str(person_id)
 
 
